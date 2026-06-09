@@ -3,123 +3,21 @@ using Statistics
 
 include("solve_history_independent_tax.jl")
 include("plot_history_independent_tax.jl")
+include("model_settings.jl")
 
-# User settings. Edit these blocks to change the calibration, grids, or solver.
-const MODEL_DIMENSIONS = (;
-    J = 12,
-    nZ = 5,
-    nEps = 5,
-    nKappa = 3,
-    nA = 61,
-)
+p = make_history_independent_params()
 
-const PREFERENCE_AND_TAX_SETTINGS = (;
-    beta = 0.960,
-    eta = 2.0,
-    phi = 1.0,
-    tau = 0.181,
-)
-
-const SHOCK_PROCESS_SETTINGS = (;
-    rho = 0.958,
-    sigma_omega = sqrt(0.017),
-    sigma_epsilon = sqrt(0.081),
-    sigma_kappa = sqrt(0.065 + 0.036),
-    z_discretization_method = :rouwenhorst,
-    tauchen_width = 3.0,
-    z_initial = 0.0,
-)
-
-const ASSET_GRID_SETTINGS = (;
-    method = :nonuniform,
-    borrow_share = 0.35,
-    curvature_borrow = 1.8,
-    curvature_save = 2.5,
-    zero_share = 0.30,  # Set positive to reserve grid points near zero.
-    zero_width = 0.08,  # Positive value creates a band around zero.
-    bbar = -0.20,
-    aMax = 12.0,
-)
-
-const FINANCIAL_AND_GOVERNMENT_SETTINGS = (;
-    qBorr = 0.90,
-    qSav = 0.99,
-    qGov = 0.99,
-    G = 0.0,
-)
-
-const LABOR_SETTINGS = (;
-    hMin = 1e-8,
-    hMax = 5.0,
-    labor_method = :foc,
-)
-
-const LAMBDA_SOLVER_SETTINGS = (;
-    lambdaMin = 0.20,
-    lambdaMax = 2.50,
-    nLambdaSearch = 15,
-    tolGovBudget = 1e-5,
-    tolLambda = 1e-5,
-)
-
-const OUTPUT_SETTINGS = (;
-    verbose = true,
-    printEveryLambda = 1,
-    store_solutions = false,
-)
-
-p = HIParams(
-    beta = PREFERENCE_AND_TAX_SETTINGS.beta,
-    eta = PREFERENCE_AND_TAX_SETTINGS.eta,
-    phi = PREFERENCE_AND_TAX_SETTINGS.phi,
-    tau = PREFERENCE_AND_TAX_SETTINGS.tau,
-    J = MODEL_DIMENSIONS.J,
-    rho = SHOCK_PROCESS_SETTINGS.rho,
-    sigma_omega = SHOCK_PROCESS_SETTINGS.sigma_omega,
-    sigma_epsilon = SHOCK_PROCESS_SETTINGS.sigma_epsilon,
-    sigma_kappa = SHOCK_PROCESS_SETTINGS.sigma_kappa,
-    nZ = MODEL_DIMENSIONS.nZ,
-    nEps = MODEL_DIMENSIONS.nEps,
-    nKappa = MODEL_DIMENSIONS.nKappa,
-    z_discretization_method = SHOCK_PROCESS_SETTINGS.z_discretization_method,
-    tauchen_width = SHOCK_PROCESS_SETTINGS.tauchen_width,
-    z_initial = SHOCK_PROCESS_SETTINGS.z_initial,
-    bbar = ASSET_GRID_SETTINGS.bbar,
-    aMax = ASSET_GRID_SETTINGS.aMax,
-    nA = MODEL_DIMENSIONS.nA,
-    asset_grid_method = ASSET_GRID_SETTINGS.method,
-    asset_grid_borrow_share = ASSET_GRID_SETTINGS.borrow_share,
-    asset_grid_curvature_borrow = ASSET_GRID_SETTINGS.curvature_borrow,
-    asset_grid_curvature_save = ASSET_GRID_SETTINGS.curvature_save,
-    asset_grid_zero_share = ASSET_GRID_SETTINGS.zero_share,
-    asset_grid_zero_width = ASSET_GRID_SETTINGS.zero_width,
-    qBorr = FINANCIAL_AND_GOVERNMENT_SETTINGS.qBorr,
-    qSav = FINANCIAL_AND_GOVERNMENT_SETTINGS.qSav,
-    qGov = FINANCIAL_AND_GOVERNMENT_SETTINGS.qGov,
-    G = FINANCIAL_AND_GOVERNMENT_SETTINGS.G,
-    hMin = LABOR_SETTINGS.hMin,
-    hMax = LABOR_SETTINGS.hMax,
-    labor_method = LABOR_SETTINGS.labor_method,
-    lambdaMin = LAMBDA_SOLVER_SETTINGS.lambdaMin,
-    lambdaMax = LAMBDA_SOLVER_SETTINGS.lambdaMax,
-    nLambdaSearch = LAMBDA_SOLVER_SETTINGS.nLambdaSearch,
-    tolGovBudget = LAMBDA_SOLVER_SETTINGS.tolGovBudget,
-    tolLambda = LAMBDA_SOLVER_SETTINGS.tolLambda,
-    verbose = OUTPUT_SETTINGS.verbose,
-    printEveryLambda = OUTPUT_SETTINGS.printEveryLambda,
-    store_solutions = OUTPUT_SETTINGS.store_solutions,
-)
-
-eq, sol = solve_history_independent_bewley(p)
+eq, _ = solve_history_independent_tax(p)
+asset_grid_path = save_asset_grid_figure(p)
 figure_paths = save_unconditional_distribution_figures(eq)
 
 @printf("\n=== Final history-independent equilibrium ===\n")
 @printf("lambda                     = %.8f\n", eq.lambda)
-@printf("government budget residual =%.8e\n", eq.govBudgetResidual)
+@printf("government budget residual = %.8e\n", eq.govBudgetResidual)
 @printf("PV output                  = %.8f\n", eq.outputPV)
 @printf("PV consumption             = %.8f\n", eq.consumptionPV)
 @printf("mean output                = %.8f\n", mean(eq.Y))
-@printf("mean consumption.          = %.8f\n", mean(eq.C))
+@printf("mean consumption           = %.8f\n", mean(eq.C))
 @printf("terminal assets            = %.8f\n", eq.A[end])
 @printf("solve time                 = %.3f seconds\n", eq.elapsedSeconds)
 
@@ -162,6 +60,7 @@ if s.upperBoundsBinding
 end
 
 @printf("\n=== Figures saved ===\n")
+@printf("asset grid                = %s\n", display_path(asset_grid_path))
 @printf("assets                    = %s\n", display_path(figure_paths.assets))
 @printf("hours worked              = %s\n", display_path(figure_paths.hours))
 @printf("consumption               = %s\n", display_path(figure_paths.consumption))
