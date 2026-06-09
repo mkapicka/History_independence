@@ -72,6 +72,7 @@ struct HIParams
 
     hMin::Float64
     hMax::Float64
+    labor_solver::Symbol
 
     lambdaMin::Float64
     lambdaMax::Float64
@@ -121,6 +122,7 @@ function HIParams(;
     G = 0.0,
     hMin = 1e-8,
     hMax = 5.0,
+    labor_solver = :brent,
     lambdaMin = 0.20,
     lambdaMax = 2.50,
     nLambdaSearch = 15,
@@ -147,6 +149,8 @@ function HIParams(;
     bbar <= 0.0 || error("Use bbar <= 0. For a borrowing limit B > 0, pass bbar = -B.")
     hMin > 0.0 || error("hMin must be positive")
     hMax > hMin || error("hMax must exceed hMin")
+    labor_solver in (:brent, :hybrid_newton) ||
+        error("labor_solver must be :brent or :hybrid_newton")
     asset_grid_method in (:nonuniform, :linear) ||
         error("asset_grid_method must be :nonuniform or :linear")
     0.0 <= asset_grid_zero_share < 1.0 ||
@@ -180,7 +184,7 @@ function HIParams(;
         asset_grid_curvature_save, asset_grid_borrow_share,
         asset_grid_zero_share, asset_grid_zero_width,
         qBorr, qSav, qGov, G,
-        hMin, hMax,
+        hMin, hMax, labor_solver,
         lambdaMin, lambdaMax, nLambdaSearch, maxIterLambda,
         tolLambda, tolGovBudget,
         verbose, printEveryLambda, massTol, store_solutions,
@@ -434,7 +438,8 @@ function print_solver_options(p::HIParams)
     end
     @printf("  asset_grid_bounds           = [%.6f, %.6f], bbar = %.6f\n",
             minimum(p.a_grid), maximum(p.a_grid), p.bbar)
-    @printf("  labor_solver                = :foc  (Roots.jl Brent)\n")
+    @printf("  labor_solver                = :%s  (alternatives: :brent, :hybrid_newton)\n",
+            String(p.labor_solver))
     @printf("  labor_bounds                = [%.2e, %.4f]\n", p.hMin, p.hMax)
     @printf("  terminal_borrowing          = :zero\n")
     @printf("  lambda_solver               = :brent  (Roots.jl; fallback: grid search over %d values)\n",
@@ -963,8 +968,7 @@ function optimal_labor_foc(cash::Float64, income_coeff::Float64, p::HIParams)
     elseif d_high >= 0.0
         h = h_high
     else
-        f(h) = labor_foc_residual(h, cash, income_coeff, p)
-        h = Roots.find_zero(f, (h_low, h_high), Roots.Brent())
+        h = solve_labor_root(h_low, h_high, cash, income_coeff, p)
     end
 
     c = cash + income_coeff * h^(1.0 - tau)
@@ -975,12 +979,69 @@ function optimal_labor_foc(cash::Float64, income_coeff::Float64, p::HIParams)
     return u, c, h
 end
 
+function solve_labor_root(h_low::Float64, h_high::Float64, cash::Float64,
+                          income_coeff::Float64, p::HIParams)
+    if p.labor_solver == :brent
+        f(h) = labor_foc_residual(h, cash, income_coeff, p)
+        return Roots.find_zero(f, (h_low, h_high), Roots.Brent())
+    elseif p.labor_solver == :hybrid_newton
+        return labor_root_hybrid_newton(h_low, h_high, cash, income_coeff, p)
+    end
+    error("Unknown labor_solver = $(p.labor_solver)")
+end
+
+function labor_root_hybrid_newton(h_low::Float64, h_high::Float64, cash::Float64,
+                                  income_coeff::Float64, p::HIParams)
+    lo = h_low
+    hi = h_high
+    h = 0.5 * (lo + hi)
+
+    for _ in 1:50
+        f = labor_foc_residual(h, cash, income_coeff, p)
+        if abs(f) <= 1e-12
+            return h
+        end
+
+        if f > 0.0
+            lo = h
+        else
+            hi = h
+        end
+
+        fp = labor_foc_residual_derivative(h, cash, income_coeff, p)
+        h_newton = h - f / fp
+        if isfinite(h_newton) && lo < h_newton < hi
+            h = h_newton
+        else
+            h = 0.5 * (lo + hi)
+        end
+
+        if hi - lo <= 1e-12 * max(1.0, abs(h))
+            return 0.5 * (lo + hi)
+        end
+    end
+
+    return 0.5 * (lo + hi)
+end
+
 function labor_foc_residual(h::Float64, cash::Float64, income_coeff::Float64, p::HIParams)
     c = cash + income_coeff * h^(1.0 - p.tau)
     if c <= 0.0
         return Inf
     end
     return income_coeff * (1.0 - p.tau) - p.phi * h^(p.eta + p.tau) * c
+end
+
+function labor_foc_residual_derivative(h::Float64, cash::Float64,
+                                       income_coeff::Float64, p::HIParams)
+    c = cash + income_coeff * h^(1.0 - p.tau)
+    if c <= 0.0
+        return -Inf
+    end
+    return -p.phi * (
+        (p.eta + p.tau) * h^(p.eta + p.tau - 1.0) * c +
+        income_coeff * (1.0 - p.tau) * h^(p.eta)
+    )
 end
 
 function first_feasible_asset_indices(kappa::Float64, p::HIParams)
