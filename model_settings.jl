@@ -1,11 +1,11 @@
 # User settings. Edit this tuple to change the model, grids, or solver.
 const SETTINGS = (;
     # dimensions
-    J = 12,
+    J = 39,
     nZ = 5,
     nEps = 5,
     nKappa = 3,
-    nA = 61,
+    nA = 101,
 
     # preferences and tax
     beta = 0.960,
@@ -31,6 +31,9 @@ const SETTINGS = (;
     asset_grid_zero_width = 0.08,
     bbar = -0.20,
     aMax = 12.0,
+    asset_choice_method = :grid_search,
+    asset_choice_tol = 1e-8,
+    asset_choice_max_iter = 50,
 
     # financial and government
     qBorr = 0.90,
@@ -41,7 +44,8 @@ const SETTINGS = (;
     # labor
     hMin = 1e-8,
     hMax = 5.0,
-    labor_solver = :brent,
+    labor_solver = :grid,
+    labor_grid_size = 151,
 
     # lambda solver
     lambdaMin = 0.20,
@@ -56,6 +60,7 @@ const SETTINGS = (;
     verbose = true,
     printEveryLambda = 1,
     store_solutions = false,
+    collect_distributions = true,
 )
 
 make_history_independent_params(; kwargs...) = HIParams(; SETTINGS..., kwargs...)

@@ -58,7 +58,6 @@
 # =============================================================================
 
 using Printf
-using Statistics
 
 include("solve_history_independent_tax.jl")
 include("plot_history_independent_tax.jl")
@@ -136,7 +135,7 @@ dominate run time):
 Base.@kwdef struct CalibrationConfig
     # Instrument brackets
     qSav_min::Float64  = 0.900
-    qSav_max::Float64  = 0.999
+    qSav_max::Float64  = 1.040
     qBorr_min::Float64 = 0.700
     qBorr_max::Float64 = 1.040
     bbar_min::Float64  = -0.80
@@ -179,11 +178,12 @@ bound `amin = min_{kappa,z} bbar*exp(kappa+rho*z)` depends on `bbar`.
 function evaluate_moments(qSav::Float64, qBorr::Float64, bbar::Float64;
                           base_kwargs...)
     p = make_history_independent_params(;
+        collect_distributions = false,
+        base_kwargs...,
         qSav = qSav,
         qBorr = qBorr,
         bbar = bbar,
         verbose = false,        # silence the inner solver
-        base_kwargs...,
     )
     eq, _ = solve_history_independent_tax(p)
     s = eq.statistics
@@ -351,7 +351,8 @@ function calibrate_history_independent_tax(;
         solve_at = function (; lambda_kwargs...)
             p = make_history_independent_params(;
                 base_kwargs..., qSav = qS, qBorr = qB, bbar = bb,
-                verbose = false, lambda_kwargs...)
+                verbose = false, lambda_kwargs...,
+                collect_distributions = false)
             n_solves[] += 1
             return solve_history_independent_tax(p)
         end
@@ -521,6 +522,9 @@ function calibrate_history_independent_tax(;
                 targets.asset_moment === :median ?
                     moments_final.meanAssetsToMeanLaborIncome :
                     moments_final.medianAssetsToMeanLaborIncome)
+        if hasproperty(eq, :welfare)
+            print_welfare_summary(eq.welfare)
+        end
         @printf("model solves             = %d\n", n_solves[])
         @printf("calibration time         = %.3f seconds\n", elapsed)
         flush(stdout)
@@ -545,14 +549,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
     asset_grid_path = save_asset_grid_figure(result.params)
     figure_paths = save_unconditional_distribution_figures(eq)
 
-    @printf("\n=== Final calibrated equilibrium ===\n")
+    @printf("\n=== Calibrated instruments ===\n")
     @printf("qSav                       = %.8f\n", result.qSav)
     @printf("qBorr                      = %.8f\n", result.qBorr)
     @printf("bbar                       = %.8f\n", result.bbar)
-    @printf("lambda                     = %.8f\n", eq.lambda)
-    @printf("government budget residual = %.8e\n", eq.govBudgetResidual)
-    @printf("mean output                = %.8f\n", mean(eq.Y))
-    @printf("mean consumption           = %.8f\n", mean(eq.C))
 
     s = eq.statistics
     t = result.targets
@@ -569,6 +569,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                          "median assets / mean labor income",
             t.asset_moment === :median ? s.meanAssetsToMeanLaborIncome :
                                          s.medianAssetsToMeanLaborIncome)
+
+    print_equilibrium_summary(eq, result.params;
+                              title = "Final calibrated equilibrium",
+                              show_welfare = true)
 
     @printf("\n=== Figures saved ===\n")
     @printf("asset grid                = %s\n", display_path(asset_grid_path))

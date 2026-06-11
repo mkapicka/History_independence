@@ -35,12 +35,6 @@ function plot_weighted_distribution(values, weights; xlabel, title, nbins::Int =
                size = (900, 550))
 end
 
-plot_grid_mass_distribution(grid, mass; kwargs...) =
-    plot_weighted_distribution(grid, mass; kwargs...)
-
-plot_weighted_observation_distribution(values, weights; kwargs...) =
-    plot_weighted_distribution(values, weights; kwargs...)
-
 function plot_asset_grid(p)
     i = collect(eachindex(p.a_grid))
     return plot(i, p.a_grid;
@@ -74,19 +68,24 @@ end
 function save_unconditional_distribution_figures(eq; output_dir = joinpath(@__DIR__, "figures"))
     mkpath(output_dir)
     d = eq.statistics.unconditionalDistributions
+    if isempty(d.weights)
+        error("Cannot plot unconditional hours and consumption distributions because observation weights are empty. Recompute the final equilibrium with collect_distributions = true; if using cached calibration output, keep final_resolve = true.")
+    end
     check_unconditional_distribution_masses(d)
 
-    asset_plot = plot_grid_mass_distribution(
+    # Assets are already accumulated as probability mass on the asset grid.
+    asset_plot = plot_weighted_distribution(
         d.assetGrid, d.assetMass;
         xlabel = "Assets",
         title = "Unconditional distribution of assets",
     )
-    hours_plot = plot_weighted_observation_distribution(
+    # Hours and consumption use observation-level values with matching weights.
+    hours_plot = plot_weighted_distribution(
         d.hours, d.weights;
         xlabel = "Hours worked",
         title = "Unconditional distribution of hours worked",
     )
-    consumption_plot = plot_weighted_observation_distribution(
+    consumption_plot = plot_weighted_distribution(
         d.consumption, d.weights;
         xlabel = "Consumption",
         title = "Unconditional distribution of consumption",
