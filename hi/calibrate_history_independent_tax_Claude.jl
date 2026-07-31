@@ -10,15 +10,19 @@
 # so that the stationary cross-section produced by
 # `solve_history_independent_tax` matches three data moments:
 #
-#     (i)   median assets / mean labor income            = 0.043
+#     (i)   mean assets / mean labor income             = 0.588
+#           (or median / mean labor income = 0.043 when asset_moment = :median)
 #     (ii)  true borrowing limit / mean labor income     = 0.180
 #     (iii) share of households with negative liquid      = 0.260
 #           assets
 #
 # These map onto the statistics returned by `finalize_statistics` as
 #
-#     (i)   eq.statistics.medianAssetsToMeanLaborIncome
-#     (ii)  eq.statistics.meanBorrowingLimitToMeanLaborIncome
+#     (i)   eq.statistics.meanAssetsToMeanLaborIncome   (default), or
+#           eq.statistics.medianAssetsToMeanLaborIncome (asset_moment = :median)
+#     (ii)  eq.statistics.meanBorrowingLimitToMeanLaborIncome, which averages
+#           -bbar*exp(kappa+rho*z) over ages j = 0,...,J-1; the terminal age is
+#           excluded because a' >= 0 is imposed there and no limit is defined
 #     (iii) eq.statistics.shareNegativeLiquidAssets
 #
 # The `solve_*` file is used unmodified; this file only wraps it.
@@ -31,9 +35,9 @@
 #
 #   * bbar  is the *only* parameter entering the "true" borrowing limit
 #     numerator  -bbar * E[exp(kappa + rho*z)]  (see `true_borrowing_limit`
-#     in simulate_kappa!).  It therefore pins down moment (ii) almost
-#     mechanically, with only a second-order feedback through mean labor
-#     income.  -> bbar solves (ii).
+#     in simulate_kappa!, averaged over ages j = 0,...,J-1).  It therefore
+#     pins down moment (ii) almost mechanically, with only a second-order
+#     feedback through mean labor income.  -> bbar solves (ii).
 #
 #   * qSav  governs the return to saving and hence the right tail / median of
 #     the asset distribution.  -> qSav solves (i).
@@ -60,7 +64,6 @@
 using Printf
 
 include("solve_history_independent_tax.jl")
-include("plot_history_independent_tax.jl")
 include("model_settings.jl")
 
 # -----------------------------------------------------------------------------
@@ -73,8 +76,8 @@ Data moments the calibration matches. Field names mirror the moment they map to
 in `eq.statistics`.
 
 `asset_moment` selects which asset statistic block (i) targets via `qSav`:
-`:median` (default) matches `medianAssetsToMeanLaborIncome`; `:mean` matches
-`meanAssetsToMeanLaborIncome` instead. Only the selected one is targeted; the
+`:mean` (default) matches `meanAssetsToMeanLaborIncome`; `:median` matches
+`medianAssetsToMeanLaborIncome` instead. Only the selected one is targeted; the
 other is reported but not matched.
 """
 Base.@kwdef struct CalibrationTargets
@@ -82,7 +85,7 @@ Base.@kwdef struct CalibrationTargets
     meanAssetsToMeanLaborIncome::Float64         = 0.588   # (i), asset_moment = :mean
     trueBorrowingLimitToMeanLaborIncome::Float64 = 0.180   # (ii)
     shareNegativeLiquidAssets::Float64           = 0.260   # (iii)
-    asset_moment::Symbol                         = :median # :median or :mean
+    asset_moment::Symbol                         = :mean   # :median or :mean
 end
 
 # Targeted asset ratio (moment i) under the selected asset_moment.
@@ -165,36 +168,16 @@ end
 # Model evaluation at a candidate (qSav, qBorr, bbar)
 # -----------------------------------------------------------------------------
 """
-    evaluate_moments(qSav, qBorr, bbar; base_kwargs...)
+    moments_from(eq)
 
-Rebuild `HIParams` with the candidate instruments (all other settings inherited
-from `SETTINGS` / `base_kwargs`), solve the model silently, and return
-`(moments, eq)` where `moments` is a NamedTuple of the three calibration
-statistics.
-
-Rebuilding (rather than mutating) is required because the asset grid's lower
-bound `amin = min_{kappa,z} bbar*exp(kappa+rho*z)` depends on `bbar`.
+The four calibration statistics of an equilibrium, named as the targets are.
 """
-function evaluate_moments(qSav::Float64, qBorr::Float64, bbar::Float64;
-                          base_kwargs...)
-    p = make_history_independent_params(;
-        collect_distributions = false,
-        base_kwargs...,
-        qSav = qSav,
-        qBorr = qBorr,
-        bbar = bbar,
-        verbose = false,        # silence the inner solver
-    )
-    eq, _ = solve_history_independent_tax(p)
-    s = eq.statistics
-    moments = (;
-        medianAssetsToMeanLaborIncome       = s.medianAssetsToMeanLaborIncome,
-        meanAssetsToMeanLaborIncome         = s.meanAssetsToMeanLaborIncome,
-        trueBorrowingLimitToMeanLaborIncome = s.meanBorrowingLimitToMeanLaborIncome,
-        shareNegativeLiquidAssets           = s.shareNegativeLiquidAssets,
-    )
-    return moments, eq
-end
+moments_from(eq) = (;
+    medianAssetsToMeanLaborIncome       = eq.statistics.medianAssetsToMeanLaborIncome,
+    meanAssetsToMeanLaborIncome         = eq.statistics.meanAssetsToMeanLaborIncome,
+    trueBorrowingLimitToMeanLaborIncome = eq.statistics.meanBorrowingLimitToMeanLaborIncome,
+    shareNegativeLiquidAssets           = eq.statistics.shareNegativeLiquidAssets,
+)
 
 # Signed residual moment - target for each block. Block (i) uses whichever
 # asset ratio (median or mean) `targets.asset_moment` selects.
@@ -285,7 +268,7 @@ model solves.
 `base_kwargs` are forwarded to `make_history_independent_params` for every
 evaluation, so any non-calibrated setting can be overridden here. As a
 convenience, any `CalibrationTargets` field name passed as a bare keyword
-(e.g. `asset_moment = :mean`, `meanAssetsToMeanLaborIncome = 0.6`) is
+(e.g. `asset_moment = :median`, `meanAssetsToMeanLaborIncome = 0.6`) is
 intercepted and used to build the targets instead of being forwarded to the
 model; an explicitly supplied `targets` takes precedence over such keywords.
 The calibrated instruments (`qSav`, `qBorr`, `bbar`) and `verbose` cannot be
@@ -296,7 +279,6 @@ function calibrate_history_independent_tax(;
         config::CalibrationConfig = CalibrationConfig(),
         kwargs...)
 
-    cfg = config
     start_time = time()
 
     # Split off CalibrationTargets fields passed as bare keywords
@@ -327,9 +309,9 @@ function calibrate_history_independent_tax(;
     end
 
     # Initial guesses from SETTINGS (sensible center of each bracket if absent).
-    qSav  = clamp(get(SETTINGS, :qSav, 0.99),  cfg.qSav_min,  cfg.qSav_max)
-    qBorr = clamp(get(SETTINGS, :qBorr, 0.90), cfg.qBorr_min, cfg.qBorr_max)
-    bbar  = clamp(get(SETTINGS, :bbar, -0.20), cfg.bbar_min,  cfg.bbar_max)
+    qSav  = clamp(get(SETTINGS, :qSav, 0.99),  config.qSav_min,  config.qSav_max)
+    qBorr = clamp(get(SETTINGS, :qBorr, 0.90), config.qBorr_min, config.qBorr_max)
+    bbar  = clamp(get(SETTINGS, :bbar, -0.20), config.bbar_min,  config.bbar_max)
 
     # ------------------------------------------------------------------
     # Cached, lambda-warm-started model evaluation.
@@ -358,8 +340,8 @@ function calibrate_history_independent_tax(;
         end
 
         local eq
-        if cfg.lambda_warm_start && isfinite(lambda_warm[])
-            w = cfg.lambda_warm_width
+        if config.lambda_warm_start && isfinite(lambda_warm[])
+            w = config.lambda_warm_width
             # nLambdaSearch = 5 caps the cost of the solver's internal
             # no-sign-change fallback if the warm bracket misses the root.
             eq, _ = solve_at(; lambdaMin = lambda_warm[] * (1.0 - w),
@@ -373,13 +355,7 @@ function calibrate_history_independent_tax(;
         end
 
         lambda_warm[] = eq.lambda
-        s = eq.statistics
-        moments = (;
-            medianAssetsToMeanLaborIncome       = s.medianAssetsToMeanLaborIncome,
-            meanAssetsToMeanLaborIncome         = s.meanAssetsToMeanLaborIncome,
-            trueBorrowingLimitToMeanLaborIncome = s.meanBorrowingLimitToMeanLaborIncome,
-            shareNegativeLiquidAssets           = s.shareNegativeLiquidAssets,
-        )
+        moments = moments_from(eq)
         cache[key] = (moments, eq)
         return moments, eq
     end
@@ -389,21 +365,21 @@ function calibrate_history_independent_tax(;
     # sweeps), falling back to the full bracket if no sign change is found.
     function solve_block(f, x_now::Float64, lo_full::Float64, hi_full::Float64,
                          first_sweep::Bool)
-        if !first_sweep && cfg.shrink_brackets
-            w = max(cfg.bracket_shrink * (hi_full - lo_full), 10.0 * cfg.inner_xtol)
+        if !first_sweep && config.shrink_brackets
+            w = max(config.bracket_shrink * (hi_full - lo_full), 10.0 * config.inner_xtol)
             lo = max(lo_full, x_now - w)
             hi = min(hi_full, x_now + w)
             x, fx, br = solve_scalar(f, lo, hi;
-                                     xtol = cfg.inner_xtol,
-                                     maxevals = cfg.inner_maxevals)
+                                     xtol = config.inner_xtol,
+                                     maxevals = config.inner_maxevals)
             br && return x, fx, br
         end
         return solve_scalar(f, lo_full, hi_full;
-                            xtol = cfg.inner_xtol,
-                            maxevals = cfg.inner_maxevals)
+                            xtol = config.inner_xtol,
+                            maxevals = config.inner_maxevals)
     end
 
-    if cfg.verbose
+    if config.verbose
         println("\n=== Calibration targets ===")
         @printf("%-40s = %.8f\n", asset_label(targets), asset_target(targets))
         @printf("true borrowing limit / mean labor income = %.8f\n",
@@ -432,11 +408,11 @@ function calibrate_history_independent_tax(;
 
     # Baseline at the starting point (row 1); exit early if already on target.
     moments, _ = eval_point(qSav, qBorr, bbar)
-    converged = max_abs_resid(moments, targets) <= cfg.moment_tol
+    converged = max_abs_resid(moments, targets) <= config.moment_tol
     sweep = 0
-    cfg.verbose && print_row("1", moments, max_abs_resid(moments, targets))
+    config.verbose && print_row("1", moments, max_abs_resid(moments, targets))
 
-    while !converged && sweep < cfg.outer_max_sweeps
+    while !converged && sweep < config.outer_max_sweeps
         sweep += 1
         first_sweep = sweep == 1
 
@@ -444,99 +420,101 @@ function calibrate_history_independent_tax(;
         # More negative bbar raises the numerator, so the residual is
         # *increasing* in (-bbar), i.e. decreasing in bbar.
         f_ii = b -> resid_ii(first(eval_point(qSav, qBorr, b)), targets)
-        bbar, _, br_ii = solve_block(f_ii, bbar, cfg.bbar_min, cfg.bbar_max,
+        bbar, _, br_ii = solve_block(f_ii, bbar, config.bbar_min, config.bbar_max,
                                      first_sweep)
 
         # --- Block (i): qSav -> asset ratio (median or mean per asset_moment) ---
         # Higher qSav => cheaper saving => higher (median and mean) assets =>
         # residual increasing in qSav.
         f_i = q -> resid_i(first(eval_point(q, qBorr, bbar)), targets)
-        qSav, _, br_i = solve_block(f_i, qSav, cfg.qSav_min, cfg.qSav_max,
+        qSav, _, br_i = solve_block(f_i, qSav, config.qSav_min, config.qSav_max,
                                     first_sweep)
 
         # --- Block (iii): qBorr -> share with negative liquid assets ---
         # Higher qBorr => cheaper borrowing => larger negative-asset share =>
         # residual increasing in qBorr.
         f_iii = q -> resid_iii(first(eval_point(qSav, q, bbar)), targets)
-        qBorr, _, br_iii = solve_block(f_iii, qBorr, cfg.qBorr_min, cfg.qBorr_max,
+        qBorr, _, br_iii = solve_block(f_iii, qBorr, config.qBorr_min, config.qBorr_max,
                                        first_sweep)
 
         # Cache hit: the qBorr block just evaluated this exact triple.
         moments, _ = eval_point(qSav, qBorr, bbar)
         gap = max_abs_resid(moments, targets)
 
-        cfg.verbose && print_row(string(sweep + 1), moments, gap,
+        config.verbose && print_row(string(sweep + 1), moments, gap,
                                  (br_i && br_ii && br_iii) ? "" : "  [unbracketed]")
 
-        converged = gap <= cfg.moment_tol
+        converged = gap <= config.moment_tol
     end
 
     # Equilibrium at the calibrated point: reuse the cached solve unless the
     # caller asked for a fresh, fully-logged final solve.
     p_final = make_history_independent_params(;
         base_kwargs..., qSav = qSav, qBorr = qBorr, bbar = bbar)
-    if cfg.final_resolve
+    if config.final_resolve
         eq, _ = solve_history_independent_tax(p_final)
         n_solves[] += 1
     else
         _, eq = eval_point(qSav, qBorr, bbar)   # cache hit
     end
-    moments_final = (;
-        medianAssetsToMeanLaborIncome       = eq.statistics.medianAssetsToMeanLaborIncome,
-        meanAssetsToMeanLaborIncome         = eq.statistics.meanAssetsToMeanLaborIncome,
-        trueBorrowingLimitToMeanLaborIncome = eq.statistics.meanBorrowingLimitToMeanLaborIncome,
-        shareNegativeLiquidAssets           = eq.statistics.shareNegativeLiquidAssets,
-    )
+    moments_final = moments_from(eq)
     residuals = (;
         assetsToMeanLaborIncome             = resid_i(moments_final, targets),
         trueBorrowingLimitToMeanLaborIncome = resid_ii(moments_final, targets),
         shareNegativeLiquidAssets           = resid_iii(moments_final, targets),
     )
 
-    elapsed = time() - start_time
-
-    if cfg.verbose
-        println("\n=== Calibration result ===")
-        @printf("converged                = %s (after %d sweep(s), maxgap=%.2e)\n",
-                converged, sweep, max_abs_resid(moments_final, targets))
-        @printf("qSav                     = %.8f\n", qSav)
-        @printf("qBorr                    = %.8f\n", qBorr)
-        @printf("bbar                     = %.8f\n", bbar)
-        @printf("%-24s = %.8f  (target %.6f, resid % .2e)\n",
-                targets.asset_moment === :median ? "median A / mean Y" :
-                                                   "mean A / mean Y",
-                asset_ratio(moments_final, targets),
-                asset_target(targets),
-                residuals.assetsToMeanLaborIncome)
-        @printf("true borr lim / mean Y   = %.8f  (target %.6f, resid % .2e)\n",
-                moments_final.trueBorrowingLimitToMeanLaborIncome,
-                targets.trueBorrowingLimitToMeanLaborIncome,
-                residuals.trueBorrowingLimitToMeanLaborIncome)
-        @printf("share negative liquid A  = %.8f  (target %.6f, resid % .2e)\n",
-                moments_final.shareNegativeLiquidAssets,
-                targets.shareNegativeLiquidAssets,
-                residuals.shareNegativeLiquidAssets)
-        @printf("%-24s = %.8f  (not targeted)\n",
-                targets.asset_moment === :median ? "mean A / mean Y" :
-                                                   "median A / mean Y",
-                targets.asset_moment === :median ?
-                    moments_final.meanAssetsToMeanLaborIncome :
-                    moments_final.medianAssetsToMeanLaborIncome)
-        if hasproperty(eq, :welfare)
-            print_welfare_summary(eq.welfare)
-        end
-        @printf("model solves             = %d\n", n_solves[])
-        @printf("calibration time         = %.3f seconds\n", elapsed)
-        flush(stdout)
-    end
-
-    return (;
+    result = (;
         qSav = qSav, qBorr = qBorr, bbar = bbar,
         eq = eq, moments = moments_final, residuals = residuals,
         converged = converged, sweeps = sweep, nSolves = n_solves[],
-        elapsedSeconds = elapsed,
+        elapsedSeconds = time() - start_time,
         targets = targets, params = p_final,
     )
+
+    config.verbose && print_calibration_result(result)
+    return result
+end
+
+"""
+    print_calibration_result(result)
+
+Report the calibrated instruments, the achieved fit, and the welfare check.
+Callers that follow this with `print_equilibrium_summary` should pass
+`show_welfare = false` so the welfare block is not printed twice.
+"""
+function print_calibration_result(result)
+    t = result.targets
+    m = result.moments
+    r = result.residuals
+    targeted, untargeted = t.asset_moment === :median ?
+        ("median A / mean Y", "mean A / mean Y") :
+        ("mean A / mean Y", "median A / mean Y")
+
+    println("\n=== Calibration result ===")
+    @printf("converged                = %s (after %d sweep(s), maxgap=%.2e)\n",
+            result.converged, result.sweeps, max_abs_resid(m, t))
+    @printf("qSav                     = %.8f\n", result.qSav)
+    @printf("qBorr                    = %.8f\n", result.qBorr)
+    @printf("bbar                     = %.8f\n", result.bbar)
+    @printf("%-24s = %.8f  (target %.6f, resid % .2e)\n",
+            targeted, asset_ratio(m, t), asset_target(t),
+            r.assetsToMeanLaborIncome)
+    @printf("true borr lim / mean Y   = %.8f  (target %.6f, resid % .2e)\n",
+            m.trueBorrowingLimitToMeanLaborIncome,
+            t.trueBorrowingLimitToMeanLaborIncome,
+            r.trueBorrowingLimitToMeanLaborIncome)
+    @printf("share negative liquid A  = %.8f  (target %.6f, resid % .2e)\n",
+            m.shareNegativeLiquidAssets, t.shareNegativeLiquidAssets,
+            r.shareNegativeLiquidAssets)
+    @printf("%-24s = %.8f  (not targeted)\n", untargeted,
+            t.asset_moment === :median ? m.meanAssetsToMeanLaborIncome :
+                                         m.medianAssetsToMeanLaborIncome)
+    hasproperty(result.eq, :welfare) && print_welfare_summary(result.eq.welfare)
+    @printf("model solves             = %d\n", result.nSolves)
+    @printf("calibration time         = %.3f seconds\n", result.elapsedSeconds)
+    flush(stdout)
+    return nothing
 end
 
 # -----------------------------------------------------------------------------
@@ -544,39 +522,7 @@ end
 # -----------------------------------------------------------------------------
 if abspath(PROGRAM_FILE) == @__FILE__
     result = calibrate_history_independent_tax()
-
-    eq = result.eq
-    asset_grid_path = save_asset_grid_figure(result.params)
-    figure_paths = save_unconditional_distribution_figures(eq)
-
-    @printf("\n=== Calibrated instruments ===\n")
-    @printf("qSav                       = %.8f\n", result.qSav)
-    @printf("qBorr                      = %.8f\n", result.qBorr)
-    @printf("bbar                       = %.8f\n", result.bbar)
-
-    s = eq.statistics
-    t = result.targets
-    @printf("\n=== Calibrated moments ===\n")
-    @printf("%-40s = %.8f (target %.3f)\n",
-            asset_label(t), asset_ratio(s, t), asset_target(t))
-    @printf("true borrowing limit / mean labor income = %.8f (target %.3f)\n",
-            s.meanBorrowingLimitToMeanLaborIncome,
-            t.trueBorrowingLimitToMeanLaborIncome)
-    @printf("share negative liquid assets             = %.8f (target %.3f)\n",
-            s.shareNegativeLiquidAssets, t.shareNegativeLiquidAssets)
-    @printf("%-40s = %.8f (not targeted)\n",
-            t.asset_moment === :median ? "mean assets / mean labor income" :
-                                         "median assets / mean labor income",
-            t.asset_moment === :median ? s.meanAssetsToMeanLaborIncome :
-                                         s.medianAssetsToMeanLaborIncome)
-
-    print_equilibrium_summary(eq, result.params;
+    print_equilibrium_summary(result.eq, result.params;
                               title = "Final calibrated equilibrium",
-                              show_welfare = true)
-
-    @printf("\n=== Figures saved ===\n")
-    @printf("asset grid                = %s\n", display_path(asset_grid_path))
-    @printf("assets                    = %s\n", display_path(figure_paths.assets))
-    @printf("hours worked              = %s\n", display_path(figure_paths.hours))
-    @printf("consumption               = %s\n", display_path(figure_paths.consumption))
+                              show_welfare = false)
 end

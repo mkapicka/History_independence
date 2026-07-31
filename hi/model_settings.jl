@@ -1,4 +1,9 @@
 # User settings. Edit this tuple to change the model, grids, or solver.
+#
+# This is the single source of truth: `HIParams` in
+# `solve_history_independent_tax.jl` carries no defaults of its own for these
+# parameters, so a value can only be changed here or by an explicit override
+# passed to `make_history_independent_params`.
 const SETTINGS = (;
     # dimensions
     J = 39,
@@ -30,7 +35,7 @@ const SETTINGS = (;
     asset_grid_zero_share = 0.30,
     asset_grid_zero_width = 0.08,
     bbar = -0.20,
-    aMax = 12.0,
+    aMax = 15.0,
     asset_choice_method = :grid_search,
     asset_choice_tol = 1e-8,
     asset_choice_max_iter = 50,
@@ -44,7 +49,7 @@ const SETTINGS = (;
     # labor
     hMin = 1e-8,
     hMax = 5.0,
-    labor_solver = :grid,
+    labor_solver = :hybrid_newton,
     labor_grid_size = 151,
 
     # lambda solver
@@ -63,4 +68,4 @@ const SETTINGS = (;
     collect_distributions = true,
 )
 
-make_history_independent_params(; kwargs...) = HIParams(; SETTINGS..., kwargs...)
+make_history_independent_params(; kwargs...) = hi_params(; SETTINGS..., kwargs...)

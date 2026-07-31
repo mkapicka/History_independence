@@ -1,1 +1,8 @@
-*/
+figures/
+calibration_results/
+backup/
+
+# not reviewed in this session
+hd/
+
+.DS_Store

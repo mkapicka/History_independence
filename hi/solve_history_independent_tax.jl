@@ -40,268 +40,224 @@ that
 Set `asset_choice_method = :grid_search` to restrict `a'` to the asset grid,
 or `:interpolate` to optimize continuous `a'` with linear interpolation of
 the continuation value.
+
+Every model parameter is a field with no hard-coded default, so `SETTINGS` in
+`model_settings.jl` is the single source of truth. Construct with
+`make_history_independent_params(; overrides...)`, or with `hi_params(; ...)`
+when supplying a complete parameter set explicitly. Fields whose default is an
+expression are derived from the fields above them.
 """
-struct HIParams
+Base.@kwdef struct HIParams
+    # Preferences and tax.
     beta::Float64
     eta::Float64
     phi::Float64
     tau::Float64
 
+    # Ages j = 0,...,J are stored in length-(J+1) vectors at index j+1.
     J::Int
-    z_grid::Vector{Float64}
-    Pz::Matrix{Float64}
-    z0_probs::Vector{Float64}
-    eps_grid::Vector{Float64}
-    Peps::Vector{Float64}
-    kappa_grid::Vector{Float64}
-    Pkappa::Vector{Float64}
+
+    # Shocks. The *_mean defaults normalize each shock to exp-mean one.
+    rho::Float64
+    sigma_omega::Float64
+    sigma_epsilon::Float64
+    sigma_kappa::Float64
+    omega_mean::Float64 = -0.5 * sigma_omega^2
+    epsilon_mean::Float64 = -0.5 * sigma_epsilon^2
+    kappa_mean::Float64 = -0.5 * sigma_kappa^2
+    nZ::Int
+    nEps::Int
+    nKappa::Int
     z_discretization_method::Symbol
     tauchen_width::Float64
+    z_initial::Float64
+    # ar1_grid and ar1_transition each rediscretize the AR(1). Both are O(nZ^2)
+    # and run once per HIParams, so staging the shared result is not worth it.
+    z_grid::Vector{Float64} =
+        ar1_grid(nZ, rho, omega_mean, sigma_omega, z_discretization_method, tauchen_width)
+    Pz::Matrix{Float64} =
+        ar1_transition(nZ, rho, omega_mean, sigma_omega, z_discretization_method, tauchen_width)
+    z0_probs::Vector{Float64} =
+        ar1_initial_probabilities(z_initial, z_grid, rho, omega_mean, sigma_omega)
+    eps_grid::Vector{Float64} = gauss_hermite_grid(nEps, epsilon_mean, sigma_epsilon)
+    Peps::Vector{Float64} = gauss_hermite_probs(nEps, epsilon_mean, sigma_epsilon)
+    kappa_grid::Vector{Float64} = gauss_hermite_grid(nKappa, kappa_mean, sigma_kappa)
+    Pkappa::Vector{Float64} = gauss_hermite_probs(nKappa, kappa_mean, sigma_kappa)
 
-    rho::Float64
+    # Asset grid.
     bbar::Float64
     aMax::Float64
     nA::Int
-    a_grid::Vector{Float64}
     asset_grid_method::Symbol
     asset_grid_curvature_borrow::Float64
     asset_grid_curvature_save::Float64
     asset_grid_borrow_share::Float64
     asset_grid_zero_share::Float64
     asset_grid_zero_width::Float64
+    a_grid::Vector{Float64} = default_asset_grid(
+        bbar, aMax, nA, rho, kappa_grid, z_grid;
+        method = asset_grid_method,
+        curvature_borrow = asset_grid_curvature_borrow,
+        curvature_save = asset_grid_curvature_save,
+        borrow_share = asset_grid_borrow_share,
+        zero_share = asset_grid_zero_share,
+        zero_width = asset_grid_zero_width,
+    )
+
+    # Asset choice.
     asset_choice_method::Symbol
     asset_choice_tol::Float64
     asset_choice_max_iter::Int
 
+    # Financial and government.
     qBorr::Float64
     qSav::Float64
     qGov::Float64
     G::Float64
 
+    # Labor.
     hMin::Float64
     hMax::Float64
-    h_grid::Vector{Float64}
-    h_grid_income_power::Vector{Float64}
-    h_grid_disutility::Vector{Float64}
+    labor_grid_size::Int
     labor_solver::Symbol
+    h_grid::Vector{Float64} = build_labor_grid(hMin, hMax, labor_grid_size)
+    h_grid_income_power::Vector{Float64} = h_grid .^ (1.0 - tau)
+    h_grid_disutility::Vector{Float64} = phi .* (h_grid .^ (1.0 + eta)) ./ (1.0 + eta)
 
+    # lambda solver.
     lambdaMin::Float64
     lambdaMax::Float64
     nLambdaSearch::Int
-    maxIterLambda::Int
+    maxIterLambda::Int = 60
     tolLambda::Float64
     tolGovBudget::Float64
 
+    # Output.
     verbose::Bool
     printEveryLambda::Int
-    massTol::Float64
+    massTol::Float64 = 1e-14
     store_solutions::Bool
     collect_distributions::Bool
 end
 
-function HIParams(;
-    beta = 0.96,
-    eta = 2.0,
-    phi = 1.0,
-    tau = 0.181,
-    J = 39,
-    rho = 0.958,
-    sigma_omega = sqrt(0.017),
-    sigma_epsilon = sqrt(0.081),
-    sigma_kappa = sqrt(0.065 + 0.036),
-    omega_mean = -0.5 * sigma_omega^2,
-    epsilon_mean = -0.5 * sigma_epsilon^2,
-    kappa_mean = -0.5 * sigma_kappa^2,
-    nZ = 5,
-    nEps = 5,
-    nKappa = 3,
-    z_discretization_method = :rouwenhorst,
-    tauchen_width = 3.0,
-    z_initial = 0.0,
-    bbar = -0.20,
-    aMax = 20.0,
-    nA = 101,
-    a_grid = Float64[],
-    asset_grid_method = :nonuniform,
-    asset_grid_curvature_borrow = 1.8,
-    asset_grid_curvature_save = 2.5,
-    asset_grid_borrow_share = 0.35,
-    asset_grid_zero_share = 0.30,
-    asset_grid_zero_width = 0.08,
-    asset_choice_method = :grid_search,
-    asset_choice_tol = 1e-8,
-    asset_choice_max_iter = 50,
-    qBorr = 0.90,
-    qSav = 0.99,
-    qGov = 0.99,
-    G = 0.0,
-    hMin = 1e-8,
-    hMax = 5.0,
-    h_grid = Float64[],
-    labor_grid_size = 101,
-    labor_solver = :brent,
-    lambdaMin = 0.20,
-    lambdaMax = 2.50,
-    nLambdaSearch = 15,
-    maxIterLambda = 60,
-    tolLambda = 1e-6,
-    tolGovBudget = 1e-6,
-    verbose = true,
-    printEveryLambda = 1,
-    massTol = 1e-14,
-    store_solutions = false,
-    collect_distributions = true,
-)
-    z_discretization_method in (:rouwenhorst, :tauchen) ||
-        error("z_discretization_method must be :rouwenhorst or :tauchen")
+"""
+    hi_params(; kwargs...)
 
-    z_grid, Pz, z0_probs = build_markov_shock(
-        "z", nZ, rho, omega_mean, sigma_omega, z_initial,
-        tauchen_width, z_discretization_method,
-    )
-    eps_grid, Peps = build_iid_normal_shock("eps", nEps, epsilon_mean, sigma_epsilon)
-    kappa_grid, Pkappa = build_iid_normal_shock("kappa", nKappa, kappa_mean, sigma_kappa)
+Build a validated `HIParams` from a complete set of parameters. A nonempty
+`a_grid` or `h_grid` replaces the generated grid and resets `nA` /
+`labor_grid_size` to match. `make_history_independent_params` supplies
+`SETTINGS` for everything the caller does not override.
+"""
+function hi_params(; kwargs...)
+    opts = NamedTuple(kwargs)
 
-    0.0 <= beta < 1.0 || error("beta must satisfy 0 <= beta < 1")
-    tau < 1.0 || error("tau must be less than one for h^(1-tau)")
-    bbar <= 0.0 || error("Use bbar <= 0. For a borrowing limit B > 0, pass bbar = -B.")
-    hMin > 0.0 || error("hMin must be positive")
-    hMax > hMin || error("hMax must exceed hMin")
-    labor_solver in (:brent, :hybrid_newton, :grid) ||
-        error("labor_solver must be :brent, :hybrid_newton, or :grid")
-    labor_grid_size >= 2 || error("labor_grid_size must be at least 2")
-    asset_grid_method in (:nonuniform, :linear) ||
-        error("asset_grid_method must be :nonuniform or :linear")
-    asset_choice_method in (:grid_search, :interpolate) ||
-        error("asset_choice_method must be :grid_search or :interpolate")
-    0.0 <= asset_grid_zero_share < 1.0 ||
-        error("asset_grid_zero_share must be in [0, 1)")
-    asset_grid_zero_width >= 0.0 || error("asset_grid_zero_width must be nonnegative")
-    asset_choice_tol > 0.0 || error("asset_choice_tol must be positive")
-    asset_choice_max_iter > 0 || error("asset_choice_max_iter must be positive")
-    printEveryLambda >= 0 || error("printEveryLambda must be nonnegative")
-
-    if isempty(a_grid)
-        amin = minimum(bbar * exp(kappa + rho * z) for kappa in kappa_grid for z in z_grid)
-        a_grid = asset_grid_with_zero(amin, aMax, nA;
-                                      method = asset_grid_method,
-                                      curvature_borrow = asset_grid_curvature_borrow,
-                                      curvature_save = asset_grid_curvature_save,
-                                      borrow_share = asset_grid_borrow_share,
-                                      zero_share = asset_grid_zero_share,
-                                      zero_width = asset_grid_zero_width)
-    else
-        a_grid = sort(collect(Float64.(a_grid)))
-        nA = length(a_grid)
-        any(iszero, a_grid) || error("a_grid must include 0.0 exactly for the initial condition")
+    if haskey(opts, :a_grid) && !isempty(opts.a_grid)
+        grid = sort(collect(Float64.(opts.a_grid)))
+        opts = merge(opts, (; a_grid = grid, nA = length(grid)))
+    elseif haskey(opts, :a_grid)
+        opts = Base.structdiff(opts, (; a_grid = nothing))
     end
-    minimum(a_grid) <= 0.0 <= maximum(a_grid) || error("a_grid must contain 0")
-    maximum(a_grid) <= aMax + 1e-12 || error("a_grid has points above aMax")
 
-    h_grid = build_labor_grid(hMin, hMax, labor_grid_size, h_grid)
-    h_grid_income_power = h_grid .^ (1.0 - tau)
-    h_grid_disutility = phi .* (h_grid .^ (1.0 + eta)) ./ (1.0 + eta)
+    if haskey(opts, :h_grid) && !isempty(opts.h_grid)
+        grid = normalize_labor_grid(opts.h_grid, opts.hMin, opts.hMax)
+        opts = merge(opts, (; h_grid = grid, labor_grid_size = length(grid)))
+    elseif haskey(opts, :h_grid)
+        opts = Base.structdiff(opts, (; h_grid = nothing))
+    end
 
-    return HIParams(
-        beta, eta, phi, tau,
-        J, z_grid, Pz, z0_probs, eps_grid, Peps, kappa_grid, Pkappa,
-        z_discretization_method, tauchen_width,
-        rho, bbar, aMax, nA, a_grid,
-        asset_grid_method, asset_grid_curvature_borrow,
-        asset_grid_curvature_save, asset_grid_borrow_share,
-        asset_grid_zero_share, asset_grid_zero_width,
-        asset_choice_method, asset_choice_tol, asset_choice_max_iter,
-        qBorr, qSav, qGov, G,
-        hMin, hMax, h_grid, h_grid_income_power, h_grid_disutility, labor_solver,
-        lambdaMin, lambdaMax, nLambdaSearch, maxIterLambda,
-        tolLambda, tolGovBudget,
-        verbose, printEveryLambda, massTol, store_solutions, collect_distributions,
-    )
+    return validate(HIParams(; opts...))
 end
 
-mutable struct HIStatsAccumulator
+"""
+    validate(p::HIParams)
+
+Check the parameter combinations that the individual grid builders cannot see.
+Returns `p` so it can wrap a construction.
+"""
+function validate(p::HIParams)
+    0.0 <= p.beta < 1.0 || error("beta must satisfy 0 <= beta < 1")
+    p.tau < 1.0 || error("tau must be less than one for h^(1-tau)")
+    p.labor_solver in (:brent, :hybrid_newton, :grid) ||
+        error("labor_solver must be :brent, :hybrid_newton, or :grid")
+    p.asset_choice_method in (:grid_search, :interpolate) ||
+        error("asset_choice_method must be :grid_search or :interpolate")
+    p.asset_choice_tol > 0.0 || error("asset_choice_tol must be positive")
+    p.asset_choice_max_iter > 0 || error("asset_choice_max_iter must be positive")
+    p.printEveryLambda >= 0 || error("printEveryLambda must be nonnegative")
+    any(iszero, p.a_grid) ||
+        error("a_grid must include 0.0 exactly for the initial condition")
+    maximum(p.a_grid) <= p.aMax + 1e-12 || error("a_grid has points above aMax")
+    length(p.z0_probs) == length(p.z_grid) || error("z0_probs length must match z_grid")
+    length(p.Peps) == length(p.eps_grid) || error("Peps length must match eps_grid")
+    length(p.Pkappa) == length(p.kappa_grid) ||
+        error("Pkappa length must match kappa_grid")
+    return p
+end
+
+Base.@kwdef mutable struct HIStatsAccumulator
     asset_mass::Vector{Float64}
-    distribution_weights::Vector{Float64}
-    hours_values::Vector{Float64}
-    consumption_values::Vector{Float64}
-    total_mass::Float64
-    sum_current_assets::Float64
-    sum_labor_income::Float64
-    sum_borrowing_limit::Float64
-    sum_effective_borrowing_limit::Float64
-    negative_asset_mass::Float64
-    zero_asset_mass::Float64
-    borrowing_constraint_mass::Float64
-    upper_bound_mass::Float64
-    hours_upper_bound_mass::Float64
-    max_next_assets::Float64
-    max_hours::Float64
-    max_material_next_assets::Float64
-    max_material_hours::Float64
+    distribution_weights::Vector{Float64} = Float64[]
+    hours_values::Vector{Float64} = Float64[]
+    consumption_values::Vector{Float64} = Float64[]
+    total_mass::Float64 = 0.0
+    sum_current_assets::Float64 = 0.0
+    sum_labor_income::Float64 = 0.0
+    sum_borrowing_limit::Float64 = 0.0
+    sum_effective_borrowing_limit::Float64 = 0.0
+    borrowing_limit_mass::Float64 = 0.0
+    negative_asset_mass::Float64 = 0.0
+    zero_asset_mass::Float64 = 0.0
+    borrowing_constraint_mass::Float64 = 0.0
+    upper_bound_mass::Float64 = 0.0
+    hours_upper_bound_mass::Float64 = 0.0
+    max_next_assets::Float64 = -Inf
+    max_hours::Float64 = -Inf
+    max_material_next_assets::Float64 = -Inf
+    max_material_hours::Float64 = -Inf
 end
 
 function HIStatsAccumulator(nA::Int)
     nA > 0 || error("nA must be positive")
-
-    asset_mass = zeros(nA)
-    distribution_weights = Float64[]
-    hours_values = Float64[]
-    consumption_values = Float64[]
-
-    return HIStatsAccumulator(
-        asset_mass, distribution_weights, hours_values, consumption_values,
-        0.0,  # total_mass
-        0.0,  # sum_current_assets
-        0.0,  # sum_labor_income
-        0.0,  # sum_borrowing_limit
-        0.0,  # sum_effective_borrowing_limit
-        0.0,  # negative_asset_mass
-        0.0,  # zero_asset_mass
-        0.0,  # borrowing_constraint_mass
-        0.0,  # upper_bound_mass
-        0.0,  # hours_upper_bound_mass
-        -Inf, # max_next_assets
-        -Inf, # max_hours
-        -Inf, # max_material_next_assets
-        -Inf, # max_material_hours
-    )
+    return HIStatsAccumulator(asset_mass = zeros(nA))
 end
+
+# How each field combines when per-kappa accumulators are reduced.
+const STATS_APPEND_FIELDS =
+    (:distribution_weights, :hours_values, :consumption_values)
+const STATS_SUM_FIELDS =
+    (:total_mass, :sum_current_assets, :sum_labor_income, :sum_borrowing_limit,
+     :sum_effective_borrowing_limit, :borrowing_limit_mass, :negative_asset_mass,
+     :zero_asset_mass, :borrowing_constraint_mass, :upper_bound_mass,
+     :hours_upper_bound_mass)
+const STATS_MAX_FIELDS =
+    (:max_next_assets, :max_hours, :max_material_next_assets, :max_material_hours)
 
 function merge_stats!(dest::HIStatsAccumulator, src::HIStatsAccumulator)
     length(dest.asset_mass) == length(src.asset_mass) ||
         error("Cannot merge statistics with different asset-grid sizes")
 
     dest.asset_mass .+= src.asset_mass
-    append!(dest.distribution_weights, src.distribution_weights)
-    append!(dest.hours_values, src.hours_values)
-    append!(dest.consumption_values, src.consumption_values)
-
-    dest.total_mass += src.total_mass
-    dest.sum_current_assets += src.sum_current_assets
-    dest.sum_labor_income += src.sum_labor_income
-    dest.sum_borrowing_limit += src.sum_borrowing_limit
-    dest.sum_effective_borrowing_limit += src.sum_effective_borrowing_limit
-    dest.negative_asset_mass += src.negative_asset_mass
-    dest.zero_asset_mass += src.zero_asset_mass
-    dest.borrowing_constraint_mass += src.borrowing_constraint_mass
-    dest.upper_bound_mass += src.upper_bound_mass
-    dest.hours_upper_bound_mass += src.hours_upper_bound_mass
-    dest.max_next_assets = max(dest.max_next_assets, src.max_next_assets)
-    dest.max_hours = max(dest.max_hours, src.max_hours)
-    dest.max_material_next_assets =
-        max(dest.max_material_next_assets, src.max_material_next_assets)
-    dest.max_material_hours = max(dest.max_material_hours, src.max_material_hours)
+    for f in STATS_APPEND_FIELDS
+        append!(getfield(dest, f), getfield(src, f))
+    end
+    for f in STATS_SUM_FIELDS
+        setfield!(dest, f, getfield(dest, f) + getfield(src, f))
+    end
+    for f in STATS_MAX_FIELDS
+        setfield!(dest, f, max(getfield(dest, f), getfield(src, f)))
+    end
     return dest
 end
 
 """
-    solve_history_independent_tax(p = HIParams())
+    solve_history_independent_tax(p::HIParams)
 
 Solve for `lambda`, household policies, age distributions, and aggregates.
 Returns `(eq, sol)`, where `eq` is a named tuple of equilibrium objects and
-`sol` contains policies only when `p.store_solutions = true`.
+`sol` contains policies only when `p.store_solutions = true`. Build `p` with
+`make_history_independent_params()`.
 """
-function solve_history_independent_tax(p::HIParams = HIParams())
+function solve_history_independent_tax(p::HIParams)
     start_time = time()
 
     if p.verbose
@@ -310,59 +266,33 @@ function solve_history_independent_tax(p::HIParams = HIParams())
         flush(stdout)
     end
 
-    # Brent only needs scalar residuals. Keep one recent full equilibrium so
-    # the final lambda does not have to be recomputed when Brent just evaluated it.
+    # Brent only needs scalar residuals, so cache every residual but retain just
+    # one full equilibrium -- the smallest-residual one seen. Keeping every `eq`
+    # would hold the distribution arrays of each trial lambda in memory.
     eval_cache = Dict{Float64,Float64}()
-    best_abs_residual = Ref(Inf)
-    best_eq = Ref{Any}(nothing)
-    best_sol = Ref{Any}(nothing)
-    last_lambda = Ref(NaN)
-    last_residual = Ref(NaN)
-    last_eq = Ref{Any}(nothing)
-    last_sol = Ref{Any}(nothing)
+    best = Ref{Any}(nothing)   # (; lambda, residual, eq, sol)
 
-    function update_best_solution!(residual, eq, sol)
-        if isfinite(residual) && abs(residual) < best_abs_residual[]
-            best_abs_residual[] = abs(residual)
-            best_eq[] = eq
-            best_sol[] = sol
+    function solve_at_lambda(lambda::Float64)
+        residual, eq, sol = government_residual_at_lambda(lambda, p)
+        eval_cache[lambda] = residual
+        incumbent = best[]
+        if isfinite(residual) &&
+           (incumbent === nothing || abs(residual) < abs(incumbent.residual))
+            best[] = (; lambda = lambda, residual = residual, eq = eq, sol = sol)
         end
-        return nothing
-    end
-
-    function remember_full_evaluation!(key::Float64, residual::Float64, eq, sol)
-        last_lambda[] = key
-        last_residual[] = residual
-        last_eq[] = eq
-        last_sol[] = sol
-        update_best_solution!(residual, eq, sol)
-        return nothing
+        return residual, eq, sol
     end
 
     function evaluate_lambda_residual(lambda::Float64)
-        key = Float64(lambda)
-        if haskey(eval_cache, key)
-            return eval_cache[key]
-        end
-
-        residual, eq, sol = government_residual_at_lambda(key, p)
-        eval_cache[key] = residual
-        remember_full_evaluation!(key, residual, eq, sol)
-        return residual
+        haskey(eval_cache, lambda) && return eval_cache[lambda]
+        return first(solve_at_lambda(lambda))
     end
 
     function evaluate_lambda_full(lambda::Float64)
-        key = Float64(lambda)
-        if last_eq[] !== nothing && last_lambda[] == key
-            return last_residual[], last_eq[], last_sol[]
-        elseif best_eq[] !== nothing && best_eq[].lambda == key
-            return eval_cache[key], best_eq[], best_sol[]
-        end
-
-        residual, eq, sol = government_residual_at_lambda(key, p)
-        eval_cache[key] = residual
-        remember_full_evaluation!(key, residual, eq, sol)
-        return residual, eq, sol
+        incumbent = best[]
+        incumbent !== nothing && incumbent.lambda == lambda &&
+            return incumbent.residual, incumbent.eq, incumbent.sol
+        return solve_at_lambda(lambda)
     end
 
     r_low = evaluate_lambda_residual(p.lambdaMin)
@@ -399,10 +329,10 @@ function solve_history_independent_tax(p::HIParams = HIParams())
             if isempty(finite_idx)
                 error("Could not evaluate any finite government residual")
             end
-            eq = attach_elapsed(best_eq[], start_time, p;
+            eq = attach_elapsed(best[].eq, start_time, p;
                                 converged = false,
                                 bracketWarning = true)
-            return eq, best_sol[]
+            return eq, best[].sol
         end
         i_low, i_high = bracket
         lambda_low, lambda_high = grid[i_low], grid[i_high]
@@ -463,15 +393,15 @@ function solve_history_independent_tax(p::HIParams = HIParams())
                             rootResidualWarning = !converged)
         return eq, sol_root
     catch err
-        if best_eq[] === nothing
+        if best[] === nothing
             rethrow(err)
         end
-        eq = attach_elapsed(best_eq[], start_time, p;
+        eq = attach_elapsed(best[].eq, start_time, p;
                             converged = false,
                             bracketWarning = false,
                             rootSolverWarning = true,
                             rootSolverError = sprint(showerror, err))
-        return eq, best_sol[]
+        return eq, best[].sol
     end
 end
 
@@ -518,11 +448,17 @@ function print_solver_options(p::HIParams)
     println()
 end
 
+"""
+    print_equilibrium_summary(eq, p; title, show_statistics, show_welfare)
+
+Print the equilibrium, aggregate statistics, and welfare decomposition. Binding
+upper bounds are reported by the solver itself (see `print_upper_bound_warning`,
+called from `attach_elapsed`), so they are not repeated here.
+"""
 function print_equilibrium_summary(eq, p::HIParams;
                                    title = "Final history-independent equilibrium",
                                    show_statistics::Bool = true,
-                                   show_welfare::Bool = true,
-                                   show_upper_bound_warning::Bool = true)
+                                   show_welfare::Bool = true)
     @printf("\n=== %s ===\n", title)
     @printf("lambda                     = %.8f\n", eq.lambda)
     @printf("government budget residual = %.8e\n", eq.govBudgetResidual)
@@ -541,13 +477,16 @@ function print_equilibrium_summary(eq, p::HIParams;
     if show_welfare && hasproperty(eq, :welfare)
         print_welfare_summary(eq.welfare)
     end
-    if show_upper_bound_warning && hasproperty(eq, :statistics)
-        print_upper_bound_warning(eq.statistics)
-    end
     return nothing
 end
 
 function print_aggregate_statistics(s, p::HIParams)
+    on_grid = p.asset_choice_method == :grid_search
+    limit_label = on_grid ? "grid borrowing limit / mean labor income" :
+                            "choice borrowing limit / mean labor income"
+    bound_label = on_grid ? "share at effective grid borrowing bound" :
+                            "share at borrowing bound"
+
     @printf("\n=== Aggregate statistics ===\n")
     @printf("mean assets / mean labor income          = %.8f\n",
             s.meanAssetsToMeanLaborIncome)
@@ -555,22 +494,11 @@ function print_aggregate_statistics(s, p::HIParams)
             s.medianAssetsToMeanLaborIncome)
     @printf("true borrowing limit / mean labor income = %.8f\n",
             s.meanBorrowingLimitToMeanLaborIncome)
-    if p.asset_choice_method == :grid_search
-        @printf("grid borrowing limit / mean labor income = %.8f\n",
-                s.meanEffectiveGridBorrowingLimitToMeanLaborIncome)
-    else
-        @printf("choice borrowing limit / mean labor income = %.8f\n",
-                s.meanEffectiveGridBorrowingLimitToMeanLaborIncome)
-    end
+    @printf("%-40s = %.8f\n", limit_label,
+            s.meanEffectiveGridBorrowingLimitToMeanLaborIncome)
     @printf("share negative liquid assets             = %.8f\n",
             s.shareNegativeLiquidAssets)
-    if p.asset_choice_method == :grid_search
-        @printf("share at effective grid borrowing bound  = %.8f\n",
-                s.shareAtEffectiveBorrowingConstraint)
-    else
-        @printf("share at borrowing bound                 = %.8f\n",
-                s.shareAtEffectiveBorrowingConstraint)
-    end
+    @printf("%-40s = %.8f\n", bound_label, s.shareAtEffectiveBorrowingConstraint)
     @printf("share with zero assets                   = %.8f\n", s.shareZeroAssets)
     @printf("share at upper asset bound               = %.8f\n", s.shareAtAssetUpperBound)
     @printf("share at hours upper bound               = %.8f\n", s.shareAtHoursUpperBound)
@@ -592,27 +520,12 @@ function print_welfare_summary(w)
     return nothing
 end
 
-function print_upper_bound_warning(s)
-    s.upperBoundsBinding || return nothing
-
-    @printf("\n=== Upper-bound warning ===\n")
-    if s.assetUpperBoundBinding
-        @printf("asset upper bound binding: bound = %.8f, material max a' = %.8f, slack = %.8e\n",
-                s.assetUpperBound, s.maxMaterialNextAssets, s.assetUpperBoundSlack)
-    end
-    if s.hoursUpperBoundBinding
-        @printf("hours upper bound binding: bound = %.8f, material max h = %.8f, slack = %.8e\n",
-                s.hoursUpperBound, s.maxMaterialHours, s.hoursUpperBoundSlack)
-    end
-    return nothing
-end
-
 function attach_elapsed(eq, start_time::Float64, p::HIParams; kwargs...)
     elapsed = time() - start_time
     eq_with_elapsed = merge(eq, (; kwargs..., elapsedSeconds = elapsed))
     if p.verbose
         print_lambda_warnings(eq_with_elapsed)
-        print_upper_bound_checks(eq_with_elapsed)
+        print_upper_bound_warning(eq_with_elapsed.statistics)
         @printf("total solve time          = %.3f seconds\n", elapsed)
         flush(stdout)
     end
@@ -648,8 +561,7 @@ function print_lambda_warnings(eq)
     flush(stdout)
 end
 
-function print_upper_bound_checks(eq)
-    s = eq.statistics
+function print_upper_bound_warning(s)
     s.upperBoundsBinding || return nothing
 
     println("WARNING: upper bound is binding.")
@@ -933,7 +845,7 @@ function interpolated_choice_value(ap::Float64, a::Float64,
                                    p::HIParams, util_weight::Float64,
                                    beta::Float64)
     cash = a - asset_price(ap, p) * ap
-    u, _, h = optimal_labor_foc(cash, income_coeff, p)
+    u, h = optimal_labor_foc(cash, income_coeff, p)
     if !isfinite(u)
         return -Inf, p.hMin
     end
@@ -980,7 +892,7 @@ function precompute_flow_payoffs(lambda::Float64, first_ap::Vector{Int},
                 for iap in ia_first:nA
                     cash_iap_ia = cash[iap, ia]
 
-                    u, _, h = optimal_labor_foc(cash_iap_ia, income_coeff, p)
+                    u, h = optimal_labor_foc(cash_iap_ia, income_coeff, p)
                     if isfinite(u)
                         flow_u[iap, ia, iz, ie] = u
                         flow_h[iap, ia, iz, ie] = h
@@ -1050,9 +962,13 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                 c = lambda * tax_base[iz, ie] * h^(1.0 - p.tau) + a - q_ap * ap
                 y = wage_base[iz, ie] * h
                 u = log(c) - p.phi * h^(1.0 + p.eta) / (1.0 + p.eta)
-                true_borrowing_limit = age == nAge ? 0.0 :
-                                       -p.bbar * exp(kappa + p.rho * p.z_grid[iz])
-                effective_borrowing_limit = -lower_ap
+                # A borrowing limit only exists before the terminal age, where
+                # a' >= 0 is imposed instead. Its mass is accumulated separately
+                # so the reported means average over ages j = 0,...,J-1 only.
+                binding_age = age < nAge
+                true_borrowing_limit = binding_age ?
+                                       -p.bbar * exp(kappa + p.rho * p.z_grid[iz]) : 0.0
+                effective_borrowing_limit = binding_age ? -lower_ap : 0.0
                 welfare_simulation += utility_weight * mass * u
 
                 weighted_mass = pkappa * mass
@@ -1072,6 +988,9 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                 stats.sum_labor_income += weighted_mass * y
                 stats.sum_borrowing_limit += weighted_mass * true_borrowing_limit
                 stats.sum_effective_borrowing_limit += weighted_mass * effective_borrowing_limit
+                if binding_age
+                    stats.borrowing_limit_mass += weighted_mass
+                end
                 stats.max_next_assets = max(stats.max_next_assets, ap)
                 stats.max_hours = max(stats.max_hours, h)
                 if weighted_mass > upper_bound_share_tol()
@@ -1228,8 +1147,12 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
     mean_assets = stats.sum_current_assets / total_mass
     mean_labor_income = stats.sum_labor_income / total_mass
     median_assets = StatsBase.median(p.a_grid, StatsBase.weights(stats.asset_mass))
-    mean_borrowing_limit = stats.sum_borrowing_limit / total_mass
-    mean_effective_borrowing_limit = stats.sum_effective_borrowing_limit / total_mass
+    # Both limits exist only at ages j = 0,...,J-1, so they are averaged over
+    # the mass of those ages rather than over the whole population.
+    mean_borrowing_limit = safe_ratio(stats.sum_borrowing_limit,
+                                      stats.borrowing_limit_mass)
+    mean_effective_borrowing_limit = safe_ratio(stats.sum_effective_borrowing_limit,
+                                                stats.borrowing_limit_mass)
     share_at_effective_borrowing_constraint = stats.borrowing_constraint_mass / total_mass
     share_at_asset_upper_bound = stats.upper_bound_mass / total_mass
     share_at_hours_upper_bound = stats.hours_upper_bound_mass / total_mass
@@ -1268,7 +1191,6 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
             safe_ratio(mean_effective_borrowing_limit, mean_labor_income),
         shareNegativeLiquidAssets = stats.negative_asset_mass / total_mass,
         shareAtEffectiveBorrowingConstraint = share_at_effective_borrowing_constraint,
-        shareAtBorrowingConstraint = share_at_effective_borrowing_constraint,
         shareZeroAssets = stats.zero_asset_mass / total_mass,
         shareAtAssetUpperBound = share_at_asset_upper_bound,
         shareAtHoursUpperBound = share_at_hours_upper_bound,
@@ -1327,15 +1249,15 @@ function optimal_labor_foc(cash::Float64, income_coeff::Float64, p::HIParams)
 
     if income_coeff <= 0.0
         if cash <= 0.0
-            return -Inf, NaN, NaN
+            return -Inf, NaN
         end
         h = h_low
         c = cash
-        return log(c) - p.phi * h^(1.0 + p.eta) / (1.0 + p.eta), c, h
+        return log(c) - p.phi * h^(1.0 + p.eta) / (1.0 + p.eta), h
     end
 
     if cash + income_coeff * h_high^(1.0 - tau) <= 0.0
-        return -Inf, NaN, NaN
+        return -Inf, NaN
     end
 
     if cash + income_coeff * h_low^(1.0 - tau) <= 0.0
@@ -1363,10 +1285,10 @@ function optimal_labor_foc(cash::Float64, income_coeff::Float64, p::HIParams)
 
     c = cash + income_coeff * h^(1.0 - tau)
     if c <= 0.0
-        return -Inf, NaN, NaN
+        return -Inf, NaN
     end
     u = log(c) - p.phi * h^(1.0 + p.eta) / (1.0 + p.eta)
-    return u, c, h
+    return u, h
 end
 
 function solve_labor_root(h_low::Float64, h_high::Float64, cash::Float64,
@@ -1384,7 +1306,6 @@ function optimal_labor_grid(h_low::Float64, h_high::Float64, cash::Float64,
                             income_coeff::Float64, p::HIParams)
     first_h = searchsortedfirst(p.h_grid, h_low - 1e-12)
     best_u = -Inf
-    best_c = NaN
     best_h = NaN
 
     @inbounds for ih in first_h:length(p.h_grid)
@@ -1401,15 +1322,14 @@ function optimal_labor_grid(h_low::Float64, h_high::Float64, cash::Float64,
         u = log(c) - p.h_grid_disutility[ih]
         if u > best_u
             best_u = u
-            best_c = c
             best_h = h
         end
     end
 
     if !isfinite(best_u)
-        return -Inf, NaN, NaN
+        return -Inf, NaN
     end
-    return best_u, best_c, best_h
+    return best_u, best_h
 end
 
 function labor_root_hybrid_newton(h_low::Float64, h_high::Float64, cash::Float64,
@@ -1488,17 +1408,18 @@ function first_nonnegative_asset_index(p::HIParams)
     return idx
 end
 
-function build_labor_grid(hMin::Float64, hMax::Float64, labor_grid_size::Int,
-                          h_grid)
-    if isempty(h_grid)
-        return collect(range(hMin, hMax, length = labor_grid_size))
-    end
+function build_labor_grid(hMin::Float64, hMax::Float64, labor_grid_size::Int)
+    hMin > 0.0 || error("hMin must be positive")
+    hMax > hMin || error("hMax must exceed hMin")
+    labor_grid_size >= 2 || error("labor_grid_size must be at least 2")
+    return collect(range(hMin, hMax, length = labor_grid_size))
+end
 
+function normalize_labor_grid(h_grid, hMin::Float64, hMax::Float64)
     grid = sort(unique(collect(Float64.(h_grid))))
     all(h -> hMin - 1e-12 <= h <= hMax + 1e-12, grid) ||
         error("h_grid entries must lie inside [hMin, hMax]")
-    grid = sort(unique(vcat(hMin, grid, hMax)))
-    return grid
+    return sort(unique(vcat(hMin, grid, hMax)))
 end
 
 asset_price(ap::Real, p::HIParams) = ap < 0.0 ? p.qBorr : p.qSav
@@ -1552,28 +1473,33 @@ function precompute_income_bases(kappa::Float64, p::HIParams)
     return tax_base, wage_base
 end
 
-function build_markov_shock(name::String, n::Int, rho::Float64,
-                            innovation_mean::Float64, innovation_sd::Float64,
-                            initial_state::Float64, tauchen_width::Float64,
-                            method::Symbol)
-    grid, P = quantecon_ar1(n, rho, innovation_mean, innovation_sd;
-                            method = method, width = tauchen_width)
-    initial_probs = ar1_conditional_probabilities(initial_state, grid, rho,
-                                                  innovation_mean, innovation_sd)
-    initial_probs = normalize_probabilities(initial_probs, "$(name)0_probs")
+ar1_grid(n::Int, rho::Float64, innovation_mean::Float64, innovation_sd::Float64,
+         method::Symbol, tauchen_width::Float64) =
+    first(quantecon_ar1(n, rho, innovation_mean, innovation_sd;
+                        method = method, width = tauchen_width))
 
-    validate_transition(P, length(grid))
-    length(initial_probs) == length(grid) ||
-        error("$(name)0_probs length must match $(name)_grid")
-    return grid, P, initial_probs
+function ar1_transition(n::Int, rho::Float64, innovation_mean::Float64,
+                        innovation_sd::Float64, method::Symbol,
+                        tauchen_width::Float64)
+    P = last(quantecon_ar1(n, rho, innovation_mean, innovation_sd;
+                           method = method, width = tauchen_width))
+    validate_transition(P, size(P, 1))
+    return P
 end
 
-function build_iid_normal_shock(name::String, n::Int, mean::Float64, sd::Float64)
-    grid, probs = normal_gauss_hermite(n, mean, sd)
-    probs = normalize_probabilities(probs, "P$(name)")
-    length(probs) == length(grid) || error("P$(name) length must match $(name)_grid")
-    return grid, probs
-end
+gauss_hermite_grid(n::Int, mean::Float64, sd::Float64) =
+    first(normal_gauss_hermite(n, mean, sd))
+
+# The builders below already scale their weights, but a second pass costs
+# nothing and leaves each probability vector summing to one in floating point.
+gauss_hermite_probs(n::Int, mean::Float64, sd::Float64) =
+    normalize_probabilities(last(normal_gauss_hermite(n, mean, sd)), "Gauss-Hermite weights")
+
+ar1_initial_probabilities(z_initial::Float64, z_grid::Vector{Float64}, rho::Float64,
+                          innovation_mean::Float64, innovation_sd::Float64) =
+    normalize_probabilities(
+        ar1_conditional_probabilities(z_initial, z_grid, rho, innovation_mean, innovation_sd),
+        "z0_probs")
 
 function quantecon_ar1(n::Int, rho::Float64, innovation_mean::Float64,
                        innovation_sd::Float64; method::Symbol = :rouwenhorst,
@@ -1662,6 +1588,21 @@ function normalize_probabilities(p::Vector{Float64}, name::String)
     s > 0.0 || error("$name sums to zero")
     p ./= s
     return p
+end
+
+"""
+    default_asset_grid(bbar, aMax, nA, rho, kappa_grid, z_grid; grid options...)
+
+Asset grid spanning the loosest borrowing limit `min_{kappa,z} bbar*exp(kappa +
+rho*z)` up to `aMax`.
+"""
+function default_asset_grid(bbar::Float64, aMax::Float64, nA::Int, rho::Float64,
+                            kappa_grid::Vector{Float64}, z_grid::Vector{Float64};
+                            kwargs...)
+    bbar <= 0.0 ||
+        error("Use bbar <= 0. For a borrowing limit B > 0, pass bbar = -B.")
+    amin = minimum(bbar * exp(kappa + rho * z) for kappa in kappa_grid for z in z_grid)
+    return asset_grid_with_zero(amin, aMax, nA; kwargs...)
 end
 
 function asset_grid_with_zero(amin::Float64, amax::Float64, nA::Int;
