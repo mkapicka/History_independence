@@ -128,14 +128,14 @@ Base.@kwdef struct HIParams
     lambdaMin::Float64
     lambdaMax::Float64
     nLambdaSearch::Int
-    maxIterLambda::Int = 60
+    maxIterLambda::Int
     tolLambda::Float64
     tolGovBudget::Float64
 
     # Output.
     verbose::Bool
     printEveryLambda::Int
-    massTol::Float64 = 1e-14
+    massTol::Float64
     store_solutions::Bool
     collect_distributions::Bool
 end

@@ -56,6 +56,7 @@ const SETTINGS = (;
     lambdaMin = 0.20,
     lambdaMax = 2.50,
     nLambdaSearch = 15,
+    maxIterLambda = 60,
     # The residual is a step function of lambda on the discrete a'-grid;
     # tighter tolerances can ask Brent to resolve jumps with no grid support.
     tolGovBudget = 1e-5,
@@ -64,6 +65,7 @@ const SETTINGS = (;
     # output
     verbose = true,
     printEveryLambda = 1,
+    massTol = 1e-14,
     store_solutions = false,
     collect_distributions = true,
 )
