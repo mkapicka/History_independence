@@ -400,6 +400,10 @@ function print_solver_options(p::HIParams)
     end
     @printf("  asset_grid_bounds           = [%.6f, %.6f], bbar = %.6f\n",
             minimum(p.a_grid), maximum(p.a_grid), p.bbar)
+    @printf("  qSav                        = %.6f  (price of saving,    a' >= 0)\n", p.qSav)
+    @printf("  qBorr                       = %.6f  (price of borrowing, a' < 0)\n", p.qBorr)
+    @printf("  qGov                        = %.6f  (government discount price)\n", p.qGov)
+    @printf("  G                           = %.6f  (government spending)\n", p.G)
     @printf("  asset_choice_method         = :%s  (alternatives: :grid_search, :interpolate)\n",
             String(p.asset_choice_method))
     if p.asset_choice_method == :interpolate
