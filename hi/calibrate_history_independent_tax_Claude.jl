@@ -68,49 +68,24 @@ using Printf
 include("run_history_independent_tax.jl")
 
 # -----------------------------------------------------------------------------
-# Calibration targets and configuration
+# Calibration parameters: targets and search controls
 # -----------------------------------------------------------------------------
 """
-    CalibrationTargets
+    CalibrationParams
 
-Data moments the calibration matches. Field names mirror the moment they map to
-in `eq.statistics`.
+Everything the calibration routine needs beyond the model itself: the data
+moments to match, and the search controls. Target field names mirror the moment
+they map to in `eq.statistics`.
 
 `asset_moment` selects which asset statistic block (i) targets via `qSav`:
 `:mean` (default) matches `meanAssetsToMeanLaborIncome`; `:median` matches
 `medianAssetsToMeanLaborIncome` instead. Only the selected one is targeted; the
 other is reported but not matched.
-"""
-Base.@kwdef struct CalibrationTargets
-    medianAssetsToMeanLaborIncome::Float64       = 0.043   # (i), asset_moment = :median
-    meanAssetsToMeanLaborIncome::Float64         = 0.588   # (i), asset_moment = :mean
-    trueBorrowingLimitToMeanLaborIncome::Float64 = 0.180   # (ii)
-    shareNegativeLiquidAssets::Float64           = 0.260   # (iii)
-    asset_moment::Symbol                         = :mean   # :median or :mean
-end
-
-# Moment (i) reads the same field name out of the achieved moments and out of
-# the targets, so one field selector serves both.
-asset_field(t::CalibrationTargets) =
-    t.asset_moment === :median ? :medianAssetsToMeanLaborIncome :
-                                 :meanAssetsToMeanLaborIncome
-asset_ratio(m, t::CalibrationTargets)  = getproperty(m, asset_field(t))
-asset_target(t::CalibrationTargets)    = getproperty(t, asset_field(t))
-asset_label(t::CalibrationTargets) =
-    t.asset_moment === :median ? "median assets / mean labor income" :
-                                 "mean assets / mean labor income"
-asset_label_short(t::CalibrationTargets) =
-    t.asset_moment === :median ? "median/LI" : "mean/LI"
-
-"""
-    CalibrationConfig
-
-Solver controls for the calibration loop.
 
 Brackets are on the *economically meaningful* ranges of the instruments:
   * `qSav`  in (0, qSav_max]; higher q => cheaper saving => more saving.
   * `qBorr` in [qBorr_min, qBorr_max]; higher q => cheaper borrowing => more
-    households with a' < 0.  We keep qBorr <= qSav is NOT imposed by the model,
+    households with a' < 0.  qBorr <= qSav is NOT imposed by the model,
     but the default bracket allows a wide spread.
   * `bbar`  in [bbar_min, 0); more negative bbar => looser limit => larger
     true-borrowing-limit moment.
@@ -131,7 +106,15 @@ Earlier versions carried three speed controls, all since removed:
     figures either way.
   * reuse of the cached final equilibrium: saved one solve in ~130.
 """
-Base.@kwdef struct CalibrationConfig
+Base.@kwdef struct CalibrationParams
+    # Targets: data moments to match (only the asset_moment-selected ratio
+    # among the first two is targeted; the other is reported but left free).
+    medianAssetsToMeanLaborIncome::Float64       = 0.043   # (i), asset_moment = :median
+    meanAssetsToMeanLaborIncome::Float64         = 0.588   # (i), asset_moment = :mean
+    trueBorrowingLimitToMeanLaborIncome::Float64 = 0.180   # (ii)
+    shareNegativeLiquidAssets::Float64           = 0.260   # (iii)
+    asset_moment::Symbol                         = :mean   # :median or :mean
+
     # Instrument brackets
     qSav_min::Float64  = 0.900
     qSav_max::Float64  = 1.040
@@ -153,6 +136,19 @@ Base.@kwdef struct CalibrationConfig
     verbose::Bool = true
 end
 
+# Moment (i) reads the same field name out of the achieved moments and out of
+# the calibration parameters, so one field selector serves both.
+asset_field(c::CalibrationParams) =
+    c.asset_moment === :median ? :medianAssetsToMeanLaborIncome :
+                                 :meanAssetsToMeanLaborIncome
+asset_ratio(m, c::CalibrationParams)  = getproperty(m, asset_field(c))
+asset_target(c::CalibrationParams)    = getproperty(c, asset_field(c))
+asset_label(c::CalibrationParams) =
+    c.asset_moment === :median ? "median assets / mean labor income" :
+                                 "mean assets / mean labor income"
+asset_label_short(c::CalibrationParams) =
+    c.asset_moment === :median ? "median/LI" : "mean/LI"
+
 # -----------------------------------------------------------------------------
 # Model evaluation at a candidate (qSav, qBorr, bbar)
 # -----------------------------------------------------------------------------
@@ -169,7 +165,7 @@ moments_from(eq) = (;
 )
 
 # Signed residual moment - target for each block. Block (i) uses whichever
-# asset ratio (median or mean) `targets.asset_moment` selects.
+# asset ratio (median or mean) `asset_moment` selects.
 resid_i(m, t)   = asset_ratio(m, t)                     - asset_target(t)
 resid_ii(m, t)  = m.trueBorrowingLimitToMeanLaborIncome - t.trueBorrowingLimitToMeanLaborIncome
 resid_iii(m, t) = m.shareNegativeLiquidAssets           - t.shareNegativeLiquidAssets
@@ -242,7 +238,7 @@ end
 # -----------------------------------------------------------------------------
 # The three blocks, in sweep order. `i` indexes the instrument vector
 # x = [qSav, qBorr, bbar]; `lo`/`hi` name the bracket fields of
-# CalibrationConfig; `resid` is the moment residual that instrument zeroes.
+# CalibrationParams; `resid` is the moment residual that instrument zeroes.
 #   bbar  -> (ii): more negative bbar raises -bbar*E[exp(kappa+rho z)], so the
 #            residual is increasing in -bbar, i.e. decreasing in bbar.
 #   qSav  -> (i):  higher qSav => cheaper saving => higher assets.
@@ -254,20 +250,21 @@ const BLOCKS = (
 )
 
 """
-    calibrate_history_independent_tax(; targets, config, base_kwargs...)
+    calibrate_history_independent_tax(; calib, base_kwargs...)
 
-Calibrate `(qSav, qBorr, bbar)` to `targets`. Returns a NamedTuple
+Calibrate `(qSav, qBorr, bbar)` to the targets in `calib`. Returns a NamedTuple
 
     (; qSav, qBorr, bbar, eq, moments, residuals, converged, sweeps,
-       nSolves, elapsedSeconds, targets, params)
+       nSolves, elapsedSeconds, calib, params)
 
 where `eq` is the equilibrium at the calibrated parameters, re-solved once with
 the caller's verbosity so the full solver log follows the calibration,
 `params` are the calibrated `HIParams`, `moments`/`residuals` report the
 achieved fit, and `nSolves` counts full model solves.
 
-`targets` must be a `CalibrationTargets`; build one explicitly to retarget, as
-in `targets = CalibrationTargets(asset_moment = :median)`.
+`calib` must be a `CalibrationParams`; build one explicitly to retarget or to
+change the search, as in `calib = CalibrationParams(asset_moment = :median,
+moment_tol = 1e-4)`.
 
 `base_kwargs` are forwarded to `make_history_independent_params` for every
 evaluation, so any non-calibrated setting can be overridden here. The
@@ -275,14 +272,13 @@ calibrated instruments (`qSav`, `qBorr`, `bbar`) and `verbose` cannot be passed
 that way.
 """
 function calibrate_history_independent_tax(;
-        targets::CalibrationTargets = CalibrationTargets(),
-        config::CalibrationConfig = CalibrationConfig(),
+        calib::CalibrationParams = CalibrationParams(),
         base_kwargs...)
 
     start_time = time()
 
-    targets.asset_moment in (:median, :mean) ||
-        error("targets.asset_moment must be :median or :mean")
+    calib.asset_moment in (:median, :mean) ||
+        error("calib.asset_moment must be :median or :mean")
 
     # Calibrated instruments (and inner-solver verbosity) are controlled here;
     # passing them through base_kwargs would silently conflict.
@@ -292,9 +288,9 @@ function calibrate_history_independent_tax(;
     end
 
     # Instrument vector, ordered as BLOCKS indexes it.
-    x = [clamp(SETTINGS.qSav,  config.qSav_min,  config.qSav_max),
-         clamp(SETTINGS.qBorr, config.qBorr_min, config.qBorr_max),
-         clamp(SETTINGS.bbar,  config.bbar_min,  config.bbar_max)]
+    x = [clamp(SETTINGS.qSav,  calib.qSav_min,  calib.qSav_max),
+         clamp(SETTINGS.qBorr, calib.qBorr_min, calib.qBorr_max),
+         clamp(SETTINGS.bbar,  calib.bbar_min,  calib.bbar_max)]
 
     # Every moment evaluation is a full model solve, so memoize on the
     # instrument triple: Brent re-probes bracket endpoints, and the sweep-end
@@ -318,27 +314,27 @@ function calibrate_history_independent_tax(;
 
     moments_at(x) = first(eval_point(x[1], x[2], x[3]))
 
-    if config.verbose
+    if calib.verbose
         println("\n=== Calibration targets ===")
-        @printf("%-40s = %.8f\n", asset_label(targets), asset_target(targets))
+        @printf("%-40s = %.8f\n", asset_label(calib), asset_target(calib))
         @printf("true borrowing limit / mean labor income = %.8f\n",
-                targets.trueBorrowingLimitToMeanLaborIncome)
+                calib.trueBorrowingLimitToMeanLaborIncome)
         @printf("share negative liquid assets             = %.8f\n",
-                targets.shareNegativeLiquidAssets)
+                calib.shareNegativeLiquidAssets)
         println()
         println("=== Calibration search ===")
         @printf("start:   qSav=%.6f qBorr=%.6f bbar=%.6f\n", x[1], x[2], x[3])
         println()
         @printf("%4s   %-10s  %-10s  %-11s %-10s  %-10s  %-9s %s\n",
                 "eval", "qSav", "qBorr", "bbar",
-                asset_label_short(targets), "trueBL/LI", "neg share", "max")
+                asset_label_short(calib), "trueBL/LI", "neg share", "max")
         flush(stdout)
     end
 
     function print_row(label, x, m, gap, note::String = "")
         @printf("%4s  %.8f  %.8f  %.8f  %.8f  %.8f  %.8f %.0e%s\n",
                 label, x[1], x[2], x[3],
-                asset_ratio(m, targets),
+                asset_ratio(m, calib),
                 m.trueBorrowingLimitToMeanLaborIncome,
                 m.shareNegativeLiquidAssets,
                 gap, note)
@@ -347,11 +343,11 @@ function calibrate_history_independent_tax(;
 
     # Baseline at the starting point (row 1); exit early if already on target.
     moments = moments_at(x)
-    converged = max_abs_resid(moments, targets) <= config.moment_tol
+    converged = max_abs_resid(moments, calib) <= calib.moment_tol
     sweep = 0
-    config.verbose && print_row("1", x, moments, max_abs_resid(moments, targets))
+    calib.verbose && print_row("1", x, moments, max_abs_resid(moments, calib))
 
-    while !converged && sweep < config.outer_max_sweeps
+    while !converged && sweep < calib.outer_max_sweeps
         sweep += 1
         bracketed = true
 
@@ -359,21 +355,21 @@ function calibrate_history_independent_tax(;
             probe = copy(x)
             f = function (z)
                 probe[blk.i] = z
-                return blk.resid(moments_at(probe), targets)
+                return blk.resid(moments_at(probe), calib)
             end
-            x[blk.i], br = solve_scalar(f, getfield(config, blk.lo),
-                                        getfield(config, blk.hi);
-                                        xtol = config.inner_xtol,
-                                        maxevals = config.inner_maxevals)
+            x[blk.i], br = solve_scalar(f, getfield(calib, blk.lo),
+                                        getfield(calib, blk.hi);
+                                        xtol = calib.inner_xtol,
+                                        maxevals = calib.inner_maxevals)
             bracketed &= br
         end
 
         # Cache hit: the last block just evaluated this exact triple.
         moments = moments_at(x)
-        gap = max_abs_resid(moments, targets)
-        config.verbose && print_row(string(sweep + 1), x, moments, gap,
+        gap = max_abs_resid(moments, calib)
+        calib.verbose && print_row(string(sweep + 1), x, moments, gap,
                                     bracketed ? "" : "  [unbracketed]")
-        converged = gap <= config.moment_tol
+        converged = gap <= calib.moment_tol
     end
 
     # Equilibrium at the calibrated point, re-solved with the caller's
@@ -385,9 +381,9 @@ function calibrate_history_independent_tax(;
 
     moments_final = moments_from(eq)
     residuals = (;
-        assetsToMeanLaborIncome             = resid_i(moments_final, targets),
-        trueBorrowingLimitToMeanLaborIncome = resid_ii(moments_final, targets),
-        shareNegativeLiquidAssets           = resid_iii(moments_final, targets),
+        assetsToMeanLaborIncome             = resid_i(moments_final, calib),
+        trueBorrowingLimitToMeanLaborIncome = resid_ii(moments_final, calib),
+        shareNegativeLiquidAssets           = resid_iii(moments_final, calib),
     )
 
     result = (;
@@ -395,10 +391,10 @@ function calibrate_history_independent_tax(;
         eq = eq, moments = moments_final, residuals = residuals,
         converged = converged, sweeps = sweep, nSolves = n_solves[],
         elapsedSeconds = time() - start_time,
-        targets = targets, params = p_final,
+        calib = calib, params = p_final,
     )
 
-    config.verbose && print_calibration_result(result)
+    calib.verbose && print_calibration_result(result)
     return result
 end
 
@@ -410,7 +406,7 @@ Callers that follow this with `print_equilibrium_summary` should pass
 `show_welfare = false` so the welfare block is not printed twice.
 """
 function print_calibration_result(result)
-    t = result.targets
+    t = result.calib
     m = result.moments
     r = result.residuals
     targeted, untargeted = t.asset_moment === :median ?
@@ -475,20 +471,20 @@ function with_tee(f, path::AbstractString)
     end
 end
 
-function calibration_log_path(targets::CalibrationTargets;
+function calibration_log_path(calib::CalibrationParams;
                               log_dir = joinpath(@__DIR__, "calibration_results"))
     s = SETTINGS
     stamp = Dates.format(Dates.now(), "yyyy-mm-dd_HHMM")
     return joinpath(log_dir,
-        "calib_$(targets.asset_moment)_J$(s.J)_nA$(s.nA)_nZ$(s.nZ)" *
+        "calib_$(calib.asset_moment)_J$(s.J)_nA$(s.nA)_nZ$(s.nZ)" *
         "_nEps$(s.nEps)_nKappa$(s.nKappa)_$(stamp).txt")
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    targets = CalibrationTargets()
-    log_path = calibration_log_path(targets)
+    calib = CalibrationParams()
+    log_path = calibration_log_path(calib)
     result = with_tee(log_path) do
-        r = calibrate_history_independent_tax(targets = targets)
+        r = calibrate_history_independent_tax(calib = calib)
         print_equilibrium_summary(r.eq, r.params;
                                   title = "Final calibrated equilibrium",
                                   show_welfare = false)
