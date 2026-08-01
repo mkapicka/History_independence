@@ -5,6 +5,10 @@
 # solve_history_dependent_tax.jl (the module is replaced, with a harmless
 # warning).
 #
+# HD_SETTINGS is the SINGLE source of truth: the HDParams constructor has no
+# defaults for these keywords, so removing an entry here fails fast with an
+# UndefKeywordError rather than falling back to a stale duplicate.
+#
 # theta0 is NOT set here: it is implied by the restriction
 #   theta0 * ( alpha/(1-beta*mu1) + (1-alpha)/(1-beta*mu2) ) = 1.
 const HD_SETTINGS = (;

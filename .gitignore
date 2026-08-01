@@ -6,4 +6,6 @@ backup/
 results/
 *.jld2
 
+LaTeX/
+
 .DS_Store

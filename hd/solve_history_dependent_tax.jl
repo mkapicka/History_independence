@@ -67,11 +67,13 @@ const VINFEASIBLE = -1.0e18
 """
     HDParams(; kwargs...)
 
-Parameters for the history-dependent tax model. `theta0` is computed from the
-restriction `theta0*(alpha/(1-beta*mu1) + (1-alpha)/(1-beta*mu2)) = 1` and
-cannot be set directly. The asset choice is always grid search and hours are
-always chosen on the labor grid (the static labor FOC is invalid because
-hours move s').
+Parameters for the history-dependent tax model. Model and solver keywords are
+REQUIRED (no defaults): construct via `make_history_dependent_params`, which
+fills them from `HD_SETTINGS` -- the single source of truth in
+model_settings.jl. `theta0` is computed from the restriction
+`theta0*(alpha/(1-beta*mu1) + (1-alpha)/(1-beta*mu2)) = 1` and cannot be set
+directly. The asset choice is always grid search and hours are always chosen
+on the labor grid (the static labor FOC is invalid because hours move s').
 """
 struct HDParams
     # preferences and tax
@@ -147,59 +149,67 @@ struct HDParams
 end
 
 function HDParams(;
-    beta = 0.96,
-    eta = 2.0,
-    phi = 1.0,
-    tau = 0.181,
-    alpha = 0.5,
-    mu1 = 0.0,
-    mu2 = 0.0,
-    J = 39,
-    rho = 0.958,
-    sigma_omega = sqrt(0.017),
-    sigma_epsilon = sqrt(0.081),
-    sigma_kappa = sqrt(0.065 + 0.036),
+    # Model and solver parameters carry NO defaults here: `HD_SETTINGS` in
+    # model_settings.jl is the single source of truth, applied through
+    # `make_history_dependent_params`. A direct `HDParams()` call missing a
+    # keyword fails fast with an UndefKeywordError instead of silently
+    # solving a different model.
+    beta,
+    eta,
+    phi,
+    tau,
+    alpha,
+    mu1,
+    mu2,
+    J,
+    rho,
+    sigma_omega,
+    sigma_epsilon,
+    sigma_kappa,
+    nZ,
+    nEps,
+    nKappa,
+    z_discretization_method,
+    bbar,
+    aMax,
+    nA,
+    asset_grid_method,
+    asset_grid_curvature_borrow,
+    asset_grid_curvature_save,
+    asset_grid_borrow_share,
+    asset_grid_zero_share,
+    asset_grid_zero_width,
+    qBorr,
+    qSav,
+    qGov,
+    G,
+    hMin,
+    hMax,
+    labor_grid_size,
+    labor_grid_spacing,
+    exploit_hours_monotonicity,
+    nS1,
+    nS2,
+    s_hours_floor,
+    lambdaMin,
+    lambdaMax,
+    nLambdaSearch,
+    maxIterLambda,
+    tolLambda,
+    tolGovBudget,
+    verbose,
+    massTol,
+    collect_distributions,
+    # Defaults survive ONLY where nothing is duplicated: derived formulas,
+    # empty-grid sentinels meaning "build the grid", and optional knobs that
+    # HD_SETTINGS deliberately omits.
     omega_mean = -0.5 * sigma_omega^2,
     epsilon_mean = -0.5 * sigma_epsilon^2,
     kappa_mean = -0.5 * sigma_kappa^2,
-    nZ = 5,
-    nEps = 5,
-    nKappa = 3,
-    z_discretization_method = :rouwenhorst,
     tauchen_width = 3.0,
     z_initial = 0.0,
-    bbar = -0.20,
-    aMax = 20.0,
-    nA = 101,
     a_grid = Float64[],
-    asset_grid_method = :nonuniform,
-    asset_grid_curvature_borrow = 1.8,
-    asset_grid_curvature_save = 2.5,
-    asset_grid_borrow_share = 0.35,
-    asset_grid_zero_share = 0.30,
-    asset_grid_zero_width = 0.08,
-    qBorr = 0.90,
-    qSav = 0.99,
-    qGov = 0.99,
-    G = 0.0,
-    hMin = 0.05,
-    hMax = 5.0,
     h_grid = Float64[],
-    labor_grid_size = 101,
-    labor_grid_spacing = :log,
-    exploit_hours_monotonicity = true,
-    nS1 = 7,
-    nS2 = 7,
-    s_hours_floor = 0.05,
-    lambdaMin = 0.20,
-    lambdaMax = 2.50,
-    nLambdaSearch = 15,
-    maxIterLambda = 60,
-    tolLambda = 1e-6,
-    tolGovBudget = 1e-6,
-    verbose = true,
-    massTol = 1e-14,
-    collect_distributions = true,
 )
     z_discretization_method in (:rouwenhorst, :tauchen) ||
         error("z_discretization_method must be :rouwenhorst or :tauchen")
