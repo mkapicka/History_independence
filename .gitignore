@@ -2,7 +2,8 @@ figures/
 calibration_results/
 backup/
 
-# not reviewed in this session
-hd/
+# large regenerable solver outputs
+results/
+*.jld2
 
 .DS_Store
