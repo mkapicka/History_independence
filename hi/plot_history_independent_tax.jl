@@ -131,25 +131,13 @@ save_average_assets_by_age_figure(result; output_dir = joinpath(@__DIR__, "figur
 save_average_hours_by_age_figure(result; output_dir = joinpath(@__DIR__, "figures")) =
     save_age_figure(result, :H; output_dir = output_dir)
 
-function check_unconditional_distribution_masses(d; tol::Float64 = 1e-10)
-    asset_total = hasproperty(d, :assetMassTotal) ? d.assetMassTotal : sum(d.assetMass)
-    observation_total =
-        hasproperty(d, :observationWeightTotal) ? d.observationWeightTotal : sum(d.weights)
-    scale = max(1.0, abs(asset_total), abs(observation_total))
-    if abs(asset_total - observation_total) > tol * scale
-        error("Unconditional distribution mass mismatch: asset grid mass = $asset_total, observation weight mass = $observation_total")
-    end
-    return nothing
-end
-
 function save_unconditional_distribution_figures(eq; output_dir = joinpath(@__DIR__, "figures"))
     mkpath(output_dir)
     eq = equilibrium_from(eq)
     d = eq.statistics.unconditionalDistributions
     if isempty(d.weights)
-        error("Cannot plot unconditional hours and consumption distributions because observation weights are empty. Recompute the final equilibrium with collect_distributions = true; if using cached calibration output, keep final_resolve = true.")
+        error("Cannot plot unconditional hours and consumption distributions because observation weights are empty. Recompute the equilibrium with collect_distributions = true.")
     end
-    check_unconditional_distribution_masses(d)
 
     # Assets are already accumulated as probability mass on the asset grid.
     asset_plot = plot_weighted_distribution(
@@ -198,19 +186,7 @@ const FIGURE_LABELS = (;
     consumption        = "consumption",
 )
 
-function display_path(path::AbstractString)
-    cloud_documents = joinpath(homedir(), "Library", "CloudStorage", "Dropbox",
-                               "Mac", "Documents")
-    if startswith(path, cloud_documents)
-        return replace(path, cloud_documents => joinpath("~", "Documents"); count = 1)
-    end
-
-    home = homedir()
-    if startswith(path, home)
-        return replace(path, home => "~"; count = 1)
-    end
-    return path
-end
+display_path(path::AbstractString) = replace(path, homedir() => "~"; count = 1)
 
 """
     plot_history_independent_tax(result; output_dir = joinpath(@__DIR__, "figures"),

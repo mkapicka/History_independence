@@ -53,10 +53,11 @@ result = calibrate_history_independent_tax(
 | `qBorr_min`/`qBorr_max` (`0.700`/`1.040`)| Bracket searched for `qBorr`                                |
 | `bbar_min`/`bbar_max` (`-0.80`/`-0.01`) | Bracket searched for `bbar`                                 |
 | `inner_xtol` (`1e-5`), `inner_maxevals` (`40`) | Tolerance and evaluation cap of each 1-D Brent solve  |
-| `lambda_warm_start` (`true`), `lambda_warm_width` (`0.10`) | Bracket `lambda` near the previous root   |
-| `shrink_brackets` (`true`), `bracket_shrink` (`0.15`) | Narrow each instrument bracket from sweep 2 on |
-| `final_resolve` (`true`)                | Re-solve once at the calibrated point with full solver output|
 | `verbose` (`true`)                      | Print the calibration's own log (inner solves are always silent)|
+
+When the file is run as a script, the full transcript is also written to
+`calibration_results/calib_<asset_moment>_J<J>_nA<nA>_nZ<nZ>_nEps<nEps>_nKappa<nKappa>_<date>.txt`,
+so archived runs and the console log come from one mechanism.
 
 ## Result structure
 `result` is a `NamedTuple`. Throughout, `nAge = J + 1 = 40`: age-indexed vectors `1, …, J+1`, correspond to `j = 0, …, J`
@@ -90,11 +91,14 @@ Some fields are not documented here.
 | `outputPV`           | `Float64`           | `qGov`-discounted sum of `Y`                                 |
 | `statistics`         | `NamedTuple`        | Cross-sectional statistics (see below)                       |
 | `welfare`            | `NamedTuple`        | Welfare by `kappa` and overall (see below)                   |
+| `solutions`          | `NamedTuple`        | Policies when `store_solutions = true`, else `nothing`       |
 | `parameters`         | `HIParams`          | Parameters used for this solve                               |
 | `converged`          | `Bool`              | `true` if `|govBudgetResidual| ≤ tolGovBudget`               |
-| `bracketWarning`     | `Bool`              | `true` if no sign change was found in the `lambda` bracket   |
-| `rootResidualWarning`| `Bool`              | `true` if Brent returned but the resid missed `tolGovBudget` |
 | `elapsedSeconds`     | `Float64`           | Time of this single solve                                    |
+
+Solver failure modes (no `lambda` bracket, Brent failure, residual above
+tolerance) are reported with `@warn` when they occur; `eq` records only
+`converged`.
 
 ### `result.eq.statistics` — cross-sectional moments
 | Field                                              | Meaning                                                |
@@ -113,8 +117,7 @@ Some fields are not documented here.
 | `shareAtEffectiveBorrowingConstraint`              | Share at the (grid) borrowing constraint               |
 | `assetUpperBound`, `hoursUpperBound`               | `aMax` and `hMax`                                      |
 | `shareAtAssetUpperBound`, `shareAtHoursUpperBound` | Mass sitting at each bound                             |
-| `maxNextAssets`, `maxHours`                        | Largest `a'` and `h` chosen                            |
-| `maxMaterialNextAssets`, `maxMaterialHours`        | Same, over cells whose mass exceeds `1e-8`             |
+| `maxMaterialNextAssets`, `maxMaterialHours`        | Largest `a'` and `h` over cells with mass above `1e-8` |
 | `assetUpperBoundSlack`, `hoursUpperBoundSlack`     | Bound minus the material maximum                       |
 | `assetUpperBoundBinding`, `hoursUpperBoundBinding` | `Bool`, share above `1e-8`                             |
 | `upperBoundsBinding`                               | `Bool`, either of the two                              |
@@ -138,7 +141,6 @@ income remains the whole-population mean over all `nAge = 40` ages.
 | `differenceByKappa`                        | `Vec{Float64}`        | Simulation minus value function; a check            |
 | `overallValueFunction`, `overallSimulation`| `Float64`             | `Pkappa`-weighted aggregates                        |
 | `overallDifference`                        | `Float64`             | Their difference; should be round-off, of order `1e-13` |
-| `maxAbsDifferenceByKappa`                  | `Float64`             | Worst per-`kappa` discrepancy                       |
 
 ## `result.moments` — the four achieved ratios
 | Field                                 | Type      | Meaning                                                          |
@@ -239,10 +241,11 @@ was regenerated against the current code and matches line for line apart from th
 two wall-clock timings.
 
 Note the `WARNING: upper bound is binding` in the solver log. At the calibrated
-point a mass share of `3.9e-7` sits exactly at `aMax = 15`, with zero slack. The
+point a mass share of `3.87e-7` sits exactly at `aMax = 15`, with zero slack. The
 share is far too small to move the targeted moments, but `aMax` is touching and
 should be raised before using this calibration for anything sensitive to the
 right tail of the asset distribution.
+
 
 
 === Calibration targets ===
@@ -256,9 +259,9 @@ start:   qSav=0.990000 qBorr=0.900000 bbar=-0.200000
 eval   qSav        qBorr       bbar        mean/LI     trueBL/LI   neg share max
    1  0.99000000  0.90000000  -0.20000000  0.29748125  0.21121353  0.15616924 3e-01
    2  0.97551787  1.00447969  -0.17042398  0.47461467  0.18014963  0.25999991 1e-01
-   3  0.97274804  1.01160653  -0.17028271  0.57399267  0.18012488  0.25990403 1e-02
-   4  0.97240987  1.01222785  -0.17016462  0.58586051  0.18001705  0.25995736 2e-03
-   5  0.97234571  1.01235421  -0.17014838  0.58757147  0.18000199  0.25994180 4e-04
+   3  0.97274828  1.01161161  -0.17028271  0.57398997  0.18012487  0.25990744 1e-02
+   4  0.97240861  1.01223082  -0.17016462  0.58590848  0.18001712  0.25996064 2e-03
+   5  0.97234663  1.01234731  -0.17014843  0.58750135  0.18000194  0.25993506 5e-04
 
 === History-independent tax finite-horizon solver ===
 Options:
@@ -282,34 +285,33 @@ Options:
   lambda_bracket              = [0.200000, 2.500000], tol = 1.00e-05
   collect_distributions       = true
 
-lambda = 0.20000000: residual = 2.42256648e-01
-lambda = 2.50000000: residual = -4.54330801e-01
-lambda eval 1: lambda=0.99988563, residual=6.60432797e-04
-lambda eval 2: lambda=1.00206904, residual=1.19497478e-06
-lambda eval 3: lambda=1.00207300, residual=2.73600637e-09
-lambda eval 4: lambda=1.00207301, residual=-8.91309679e-12
-lambda root: lambda=1.00207301, residual=-8.91309679e-12
+lambda = 0.20000000: residual = 2.42257155e-01
+lambda = 2.50000000: residual = -4.54330338e-01
+lambda eval 1: lambda=0.99988725, residual=6.60182176e-04
+lambda eval 2: lambda=1.00206983, residual=1.59663949e-06
+lambda eval 3: lambda=1.00207513, residual=-6.19476248e-08
+lambda root: lambda=1.00207513, residual=-6.19476248e-08
 WARNING: upper bound is binding.
-  asset upper bound       = BINDING (share = 3.89055482e-07, bound = 15.00000000, material max a' = 15.00000000, slack = 0.00000000e+00)
-total solve time          = 2.125 seconds
+  asset upper bound       = BINDING (share = 3.86727009e-07, bound = 15.00000000, material max a' = 15.00000000, slack = 0.00000000e+00)
+total solve time          = 1.397 seconds
 
 === Calibration result ===
-converged                = true (after 4 sweep(s), maxgap=4.29e-04)
-qSav                     = 0.97234571
-qBorr                    = 1.01235421
-bbar                     = -0.17014838
-mean A / mean Y          = 0.58757147  (target 0.588000, resid -4.29e-04)
-true borr lim / mean Y   = 0.18000199  (target 0.180000, resid  1.99e-06)
-share negative liquid A  = 0.25994180  (target 0.260000, resid -5.82e-05)
-median A / mean Y        = 0.23949389  (not targeted)
+converged                = true (after 4 sweep(s), maxgap=4.99e-04)
+qSav                     = 0.97234663
+qBorr                    = 1.01234731
+bbar                     = -0.17014843
+mean A / mean Y          = 0.58750135  (target 0.588000, resid -4.99e-04)
+true borr lim / mean Y   = 0.18000194  (target 0.180000, resid  1.94e-06)
+share negative liquid A  = 0.25993506  (target 0.260000, resid -6.49e-05)
+median A / mean Y        = 0.23948908  (not targeted)
 
 === Welfare ===
-overall value function utility = -0.3595301562
-overall simulation utility     = -0.3595301562
-overall difference             = 8.29336599e-14
+overall value function utility = -0.3595290378
+overall simulation utility     = -0.3595290378
+overall difference             = 8.42659276e-14
 kappa      prob        value function  simulation     difference
--0.600954  0.16666667  -0.7226378290  -0.7226378290   4.29878355e-13
--0.050500  0.66666667  -0.3595221565  -0.3595221565   1.39888101e-14
- 0.499954  0.16666667   0.0035455175   0.0035455175   1.15723403e-14
-model solves             = 127
-calibration time         = 257.847 seconds
+-0.600954  0.16666667  -0.7226366759  -0.7226366759   4.28324043e-13
+-0.050500  0.66666667  -0.3595210399  -0.3595210399   1.64868119e-14
+ 0.499954  0.16666667   0.0035466088   0.0035466088   1.13281780e-14
+model solves             = 144
+calibration time         = 255.949 seconds

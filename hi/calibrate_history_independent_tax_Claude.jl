@@ -61,10 +61,11 @@
 #   * Standard SMM/just-identified GMM logic: 3 instruments, 3 moments.
 # =============================================================================
 
+using Dates
 using Printf
 
-include("solve_history_independent_tax.jl")
-include("model_settings.jl")
+# Includes flow one direction: solve <- settings <- run <- calibrate.
+include("run_history_independent_tax.jl")
 
 # -----------------------------------------------------------------------------
 # Calibration targets and configuration
@@ -88,13 +89,13 @@ Base.@kwdef struct CalibrationTargets
     asset_moment::Symbol                         = :mean   # :median or :mean
 end
 
-# Targeted asset ratio (moment i) under the selected asset_moment.
-asset_ratio(m, t::CalibrationTargets) =
-    t.asset_moment === :median ? m.medianAssetsToMeanLaborIncome :
-                                 m.meanAssetsToMeanLaborIncome
-asset_target(t::CalibrationTargets) =
-    t.asset_moment === :median ? t.medianAssetsToMeanLaborIncome :
-                                 t.meanAssetsToMeanLaborIncome
+# Moment (i) reads the same field name out of the achieved moments and out of
+# the targets, so one field selector serves both.
+asset_field(t::CalibrationTargets) =
+    t.asset_moment === :median ? :medianAssetsToMeanLaborIncome :
+                                 :meanAssetsToMeanLaborIncome
+asset_ratio(m, t::CalibrationTargets)  = getproperty(m, asset_field(t))
+asset_target(t::CalibrationTargets)    = getproperty(t, asset_field(t))
 asset_label(t::CalibrationTargets) =
     t.asset_moment === :median ? "median assets / mean labor income" :
                                  "mean assets / mean labor income"
@@ -119,21 +120,16 @@ Brackets are on the *economically meaningful* ranges of the instruments:
 tolerance. `moment_tol` is the stopping criterion on the max absolute moment
 residual.
 
-Efficiency controls (all reduce the number of full model solves, which
-dominate run time):
-  * `lambda_warm_start` / `lambda_warm_width`: solve each inner model with the
-    government-budget lambda bracketed within `+/- lambda_warm_width` (relative)
-    of the previously found lambda, falling back to the full default bracket if
-    that narrow solve does not converge.
-  * `shrink_brackets` / `bracket_shrink`: from sweep 2 onward, root-find each
-    instrument on a window of width `bracket_shrink * (full range)` centered on
-    its current value, falling back to the full bracket if no sign change is
-    found there.
-  * `final_resolve`: if `true` (default), re-solve once more at the calibrated
-    point with the caller's verbosity, printing the full solver log
-    ("=== History-independent tax finite-horizon solver ===") after the
-    calibration; if `false`, reuse the cached equilibrium (one solve cheaper,
-    no solver log).
+Earlier versions carried three speed controls, all since removed:
+  * warm-started lambda brackets: measured to do nothing. Brent needs 5
+    aggregate solves per equilibrium whether it starts from [0.20, 2.50] or
+    from lambda*(1 +- 0.10), because its convergence is insensitive to the
+    initial bracket width.
+  * sweep-to-sweep bracket shrinking: this one did save work. The search takes
+    144 model solves without it against 127 with it, about 13% more. Restore it
+    if that matters; the calibrated instruments agree to six significant
+    figures either way.
+  * reuse of the cached final equilibrium: saved one solve in ~130.
 """
 Base.@kwdef struct CalibrationConfig
     # Instrument brackets
@@ -151,13 +147,6 @@ Base.@kwdef struct CalibrationConfig
     # Outer block-coordinate loop
     outer_max_sweeps::Int = 12
     moment_tol::Float64   = 5e-4
-
-    # Efficiency controls
-    lambda_warm_start::Bool  = true
-    lambda_warm_width::Float64 = 0.10
-    shrink_brackets::Bool    = true
-    bracket_shrink::Float64  = 0.15
-    final_resolve::Bool      = true
 
     # Pass-through solver verbosity (the *inner* model solves are silenced
     # regardless; this only controls the calibration's own logging).
@@ -201,7 +190,9 @@ max_abs_resid(m, t) = max(abs(resid_i(m, t)),
 """
     solve_scalar(f, lo, hi; xtol, maxevals, nscan)
 
-Find x in [lo, hi] with f(x) ~ 0. Returns `(x, fx, bracketed::Bool)`.
+Find x in [lo, hi] with f(x) ~ 0. Returns `(x, bracketed::Bool)`. The residual
+at `x` is deliberately not returned: every caller ignored it, and computing it
+costs an extra model solve whenever Brent's last probe was not at the root.
 """
 function solve_scalar(f, lo::Float64, hi::Float64;
                       xtol::Float64 = 1e-5, maxevals::Int = 40,
@@ -210,12 +201,12 @@ function solve_scalar(f, lo::Float64, hi::Float64;
     fhi = f(hi)
 
     if abs(flo) <= xtol
-        return lo, flo, true
+        return lo, true
     elseif abs(fhi) <= xtol
-        return hi, fhi, true
+        return hi, true
     end
 
-    a, fa, b, fb = lo, flo, hi, fhi
+    a, b = lo, hi
     if sign(flo) == sign(fhi)
         # Scan the interior for a sign change.
         xs = collect(range(lo, hi, length = nscan))
@@ -235,21 +226,33 @@ function solve_scalar(f, lo::Float64, hi::Float64;
         end
         if bracket === nothing
             # No sign change: return the closest scanned point.
-            idx = argmin(abs.(fs))
-            return xs[idx], fs[idx], false
+            return xs[argmin(abs.(fs))], false
         end
         klo, khi = bracket
-        a, fa, b, fb = xs[klo], fs[klo], xs[khi], fs[khi]
+        a, b = xs[klo], xs[khi]
     end
 
     x = Roots.find_zero(f, (a, b), Roots.Brent();
                         xatol = xtol, maxevals = max(maxevals, 12))
-    return x, f(x), true
+    return x, true
 end
 
 # -----------------------------------------------------------------------------
 # Main calibration routine
 # -----------------------------------------------------------------------------
+# The three blocks, in sweep order. `i` indexes the instrument vector
+# x = [qSav, qBorr, bbar]; `lo`/`hi` name the bracket fields of
+# CalibrationConfig; `resid` is the moment residual that instrument zeroes.
+#   bbar  -> (ii): more negative bbar raises -bbar*E[exp(kappa+rho z)], so the
+#            residual is increasing in -bbar, i.e. decreasing in bbar.
+#   qSav  -> (i):  higher qSav => cheaper saving => higher assets.
+#   qBorr -> (iii):higher qBorr => cheaper borrowing => larger negative share.
+const BLOCKS = (
+    (i = 3, lo = :bbar_min,  hi = :bbar_max,  resid = resid_ii),
+    (i = 1, lo = :qSav_min,  hi = :qSav_max,  resid = resid_i),
+    (i = 2, lo = :qBorr_min, hi = :qBorr_max, resid = resid_iii),
+)
+
 """
     calibrate_history_independent_tax(; targets, config, base_kwargs...)
 
@@ -258,45 +261,25 @@ Calibrate `(qSav, qBorr, bbar)` to `targets`. Returns a NamedTuple
     (; qSav, qBorr, bbar, eq, moments, residuals, converged, sweeps,
        nSolves, elapsedSeconds, targets, params)
 
-where `eq` is the equilibrium at the calibrated parameters (by default
-re-solved once with the caller's verbosity, printing the full solver log
-after the calibration; set `config.final_resolve = false` to reuse the
-cached equilibrium instead), `params` are the calibrated `HIParams`,
-`moments`/`residuals` report the achieved fit, and `nSolves` counts full
-model solves.
+where `eq` is the equilibrium at the calibrated parameters, re-solved once with
+the caller's verbosity so the full solver log follows the calibration,
+`params` are the calibrated `HIParams`, `moments`/`residuals` report the
+achieved fit, and `nSolves` counts full model solves.
+
+`targets` must be a `CalibrationTargets`; build one explicitly to retarget, as
+in `targets = CalibrationTargets(asset_moment = :median)`.
 
 `base_kwargs` are forwarded to `make_history_independent_params` for every
-evaluation, so any non-calibrated setting can be overridden here. As a
-convenience, any `CalibrationTargets` field name passed as a bare keyword
-(e.g. `asset_moment = :median`, `meanAssetsToMeanLaborIncome = 0.6`) is
-intercepted and used to build the targets instead of being forwarded to the
-model; an explicitly supplied `targets` takes precedence over such keywords.
-The calibrated instruments (`qSav`, `qBorr`, `bbar`) and `verbose` cannot be
-passed through `base_kwargs`.
+evaluation, so any non-calibrated setting can be overridden here. The
+calibrated instruments (`qSav`, `qBorr`, `bbar`) and `verbose` cannot be passed
+that way.
 """
 function calibrate_history_independent_tax(;
-        targets::Union{CalibrationTargets,Nothing} = nothing,
+        targets::CalibrationTargets = CalibrationTargets(),
         config::CalibrationConfig = CalibrationConfig(),
-        kwargs...)
+        base_kwargs...)
 
     start_time = time()
-
-    # Split off CalibrationTargets fields passed as bare keywords
-    # (convenience: `asset_moment = :mean` instead of building the struct).
-    kw = Dict{Symbol,Any}(pairs(kwargs))
-    target_kw = Dict{Symbol,Any}()
-    for k in collect(keys(kw))
-        if k in fieldnames(CalibrationTargets)
-            target_kw[k] = pop!(kw, k)
-        end
-    end
-    if targets === nothing
-        targets = CalibrationTargets(; target_kw...)
-    elseif !isempty(target_kw)
-        @warn "Both `targets` and target keyword(s) $(sort!(collect(keys(target_kw)))) " *
-              "were supplied; using `targets` and ignoring the keywords."
-    end
-    base_kwargs = (; kw...)
 
     targets.asset_moment in (:median, :mean) ||
         error("targets.asset_moment must be :median or :mean")
@@ -308,76 +291,32 @@ function calibrate_history_independent_tax(;
             error("`$(k)` cannot be passed via base_kwargs; it is set by the calibration")
     end
 
-    # Initial guesses from SETTINGS (sensible center of each bracket if absent).
-    qSav  = clamp(get(SETTINGS, :qSav, 0.99),  config.qSav_min,  config.qSav_max)
-    qBorr = clamp(get(SETTINGS, :qBorr, 0.90), config.qBorr_min, config.qBorr_max)
-    bbar  = clamp(get(SETTINGS, :bbar, -0.20), config.bbar_min,  config.bbar_max)
+    # Instrument vector, ordered as BLOCKS indexes it.
+    x = [clamp(SETTINGS.qSav,  config.qSav_min,  config.qSav_max),
+         clamp(SETTINGS.qBorr, config.qBorr_min, config.qBorr_max),
+         clamp(SETTINGS.bbar,  config.bbar_min,  config.bbar_max)]
 
-    # ------------------------------------------------------------------
-    # Cached, lambda-warm-started model evaluation.
-    #
-    # Every moment evaluation is a full model solve, so we (a) memoize on
-    # the instrument triple -- Brent re-probes bracket endpoints, and the
-    # sweep-end / final evaluations repeat points already solved -- and
-    # (b) bracket the government-budget lambda near the previously found
-    # root, falling back to the full default bracket if that fails.
-    # ------------------------------------------------------------------
+    # Every moment evaluation is a full model solve, so memoize on the
+    # instrument triple: Brent re-probes bracket endpoints, and the sweep-end
+    # evaluation repeats the point the last block just solved.
     cache = Dict{NTuple{3,Float64},Any}()
     n_solves = Ref(0)
-    lambda_warm = Ref(NaN)
 
     function eval_point(qS::Float64, qB::Float64, bb::Float64)
         key = (qS, qB, bb)
         haskey(cache, key) && return cache[key]
 
-        solve_at = function (; lambda_kwargs...)
-            p = make_history_independent_params(;
-                base_kwargs..., qSav = qS, qBorr = qB, bbar = bb,
-                verbose = false, lambda_kwargs...,
-                collect_distributions = false)
-            n_solves[] += 1
-            return solve_history_independent_tax(p)
-        end
+        p = make_history_independent_params(;
+            base_kwargs..., qSav = qS, qBorr = qB, bbar = bb,
+            verbose = false, collect_distributions = false)
+        n_solves[] += 1
+        eq = solve_history_independent_tax(p)
 
-        local eq
-        if config.lambda_warm_start && isfinite(lambda_warm[])
-            w = config.lambda_warm_width
-            # nLambdaSearch = 5 caps the cost of the solver's internal
-            # no-sign-change fallback if the warm bracket misses the root.
-            eq, _ = solve_at(; lambdaMin = lambda_warm[] * (1.0 - w),
-                               lambdaMax = lambda_warm[] * (1.0 + w),
-                               nLambdaSearch = 5)
-            if !(hasproperty(eq, :converged) && eq.converged === true)
-                eq, _ = solve_at()   # retry on the full default bracket
-            end
-        else
-            eq, _ = solve_at()
-        end
-
-        lambda_warm[] = eq.lambda
-        moments = moments_from(eq)
-        cache[key] = (moments, eq)
-        return moments, eq
+        cache[key] = (moments_from(eq), eq)
+        return cache[key]
     end
 
-    # Root-find one instrument: from sweep 2 onward, search a narrow window
-    # around the current value first (the solution moves little between
-    # sweeps), falling back to the full bracket if no sign change is found.
-    function solve_block(f, x_now::Float64, lo_full::Float64, hi_full::Float64,
-                         first_sweep::Bool)
-        if !first_sweep && config.shrink_brackets
-            w = max(config.bracket_shrink * (hi_full - lo_full), 10.0 * config.inner_xtol)
-            lo = max(lo_full, x_now - w)
-            hi = min(hi_full, x_now + w)
-            x, fx, br = solve_scalar(f, lo, hi;
-                                     xtol = config.inner_xtol,
-                                     maxevals = config.inner_maxevals)
-            br && return x, fx, br
-        end
-        return solve_scalar(f, lo_full, hi_full;
-                            xtol = config.inner_xtol,
-                            maxevals = config.inner_maxevals)
-    end
+    moments_at(x) = first(eval_point(x[1], x[2], x[3]))
 
     if config.verbose
         println("\n=== Calibration targets ===")
@@ -388,7 +327,7 @@ function calibrate_history_independent_tax(;
                 targets.shareNegativeLiquidAssets)
         println()
         println("=== Calibration search ===")
-        @printf("start:   qSav=%.6f qBorr=%.6f bbar=%.6f\n", qSav, qBorr, bbar)
+        @printf("start:   qSav=%.6f qBorr=%.6f bbar=%.6f\n", x[1], x[2], x[3])
         println()
         @printf("%4s   %-10s  %-10s  %-11s %-10s  %-10s  %-9s %s\n",
                 "eval", "qSav", "qBorr", "bbar",
@@ -396,9 +335,9 @@ function calibrate_history_independent_tax(;
         flush(stdout)
     end
 
-    print_row = function (label, m, gap, note::String = "")
+    function print_row(label, x, m, gap, note::String = "")
         @printf("%4s  %.8f  %.8f  %.8f  %.8f  %.8f  %.8f %.0e%s\n",
-                label, qSav, qBorr, bbar,
+                label, x[1], x[2], x[3],
                 asset_ratio(m, targets),
                 m.trueBorrowingLimitToMeanLaborIncome,
                 m.shareNegativeLiquidAssets,
@@ -407,56 +346,43 @@ function calibrate_history_independent_tax(;
     end
 
     # Baseline at the starting point (row 1); exit early if already on target.
-    moments, _ = eval_point(qSav, qBorr, bbar)
+    moments = moments_at(x)
     converged = max_abs_resid(moments, targets) <= config.moment_tol
     sweep = 0
-    config.verbose && print_row("1", moments, max_abs_resid(moments, targets))
+    config.verbose && print_row("1", x, moments, max_abs_resid(moments, targets))
 
     while !converged && sweep < config.outer_max_sweeps
         sweep += 1
-        first_sweep = sweep == 1
+        bracketed = true
 
-        # --- Block (ii): bbar -> true borrowing limit / mean labor income ---
-        # More negative bbar raises the numerator, so the residual is
-        # *increasing* in (-bbar), i.e. decreasing in bbar.
-        f_ii = b -> resid_ii(first(eval_point(qSav, qBorr, b)), targets)
-        bbar, _, br_ii = solve_block(f_ii, bbar, config.bbar_min, config.bbar_max,
-                                     first_sweep)
+        for blk in BLOCKS
+            probe = copy(x)
+            f = function (z)
+                probe[blk.i] = z
+                return blk.resid(moments_at(probe), targets)
+            end
+            x[blk.i], br = solve_scalar(f, getfield(config, blk.lo),
+                                        getfield(config, blk.hi);
+                                        xtol = config.inner_xtol,
+                                        maxevals = config.inner_maxevals)
+            bracketed &= br
+        end
 
-        # --- Block (i): qSav -> asset ratio (median or mean per asset_moment) ---
-        # Higher qSav => cheaper saving => higher (median and mean) assets =>
-        # residual increasing in qSav.
-        f_i = q -> resid_i(first(eval_point(q, qBorr, bbar)), targets)
-        qSav, _, br_i = solve_block(f_i, qSav, config.qSav_min, config.qSav_max,
-                                    first_sweep)
-
-        # --- Block (iii): qBorr -> share with negative liquid assets ---
-        # Higher qBorr => cheaper borrowing => larger negative-asset share =>
-        # residual increasing in qBorr.
-        f_iii = q -> resid_iii(first(eval_point(qSav, q, bbar)), targets)
-        qBorr, _, br_iii = solve_block(f_iii, qBorr, config.qBorr_min, config.qBorr_max,
-                                       first_sweep)
-
-        # Cache hit: the qBorr block just evaluated this exact triple.
-        moments, _ = eval_point(qSav, qBorr, bbar)
+        # Cache hit: the last block just evaluated this exact triple.
+        moments = moments_at(x)
         gap = max_abs_resid(moments, targets)
-
-        config.verbose && print_row(string(sweep + 1), moments, gap,
-                                 (br_i && br_ii && br_iii) ? "" : "  [unbracketed]")
-
+        config.verbose && print_row(string(sweep + 1), x, moments, gap,
+                                    bracketed ? "" : "  [unbracketed]")
         converged = gap <= config.moment_tol
     end
 
-    # Equilibrium at the calibrated point: reuse the cached solve unless the
-    # caller asked for a fresh, fully-logged final solve.
+    # Equilibrium at the calibrated point, re-solved with the caller's
+    # verbosity so the full solver log follows the search.
     p_final = make_history_independent_params(;
-        base_kwargs..., qSav = qSav, qBorr = qBorr, bbar = bbar)
-    if config.final_resolve
-        eq, _ = solve_history_independent_tax(p_final)
-        n_solves[] += 1
-    else
-        _, eq = eval_point(qSav, qBorr, bbar)   # cache hit
-    end
+        base_kwargs..., qSav = x[1], qBorr = x[2], bbar = x[3])
+    eq = solve_history_independent_tax(p_final)
+    n_solves[] += 1
+
     moments_final = moments_from(eq)
     residuals = (;
         assetsToMeanLaborIncome             = resid_i(moments_final, targets),
@@ -465,7 +391,7 @@ function calibrate_history_independent_tax(;
     )
 
     result = (;
-        qSav = qSav, qBorr = qBorr, bbar = bbar,
+        qSav = x[1], qBorr = x[2], bbar = x[3],
         eq = eq, moments = moments_final, residuals = residuals,
         converged = converged, sweeps = sweep, nSolves = n_solves[],
         elapsedSeconds = time() - start_time,
@@ -520,9 +446,53 @@ end
 # -----------------------------------------------------------------------------
 # Script entry point (mirrors run_history_independent_tax.jl)
 # -----------------------------------------------------------------------------
+"""
+    with_tee(f, path)
+
+Run `f()` with everything written to `stdout` also appended to the file at
+`path`. Returns `f()`'s value. Used by the script entry point so calibration
+transcripts are archived automatically instead of copy-pasted from the console.
+"""
+function with_tee(f, path::AbstractString)
+    mkpath(dirname(path))
+    io = open(path, "w")
+    original = stdout
+    rd, wr = redirect_stdout()
+    copier = @async while !eof(rd)
+        chunk = readavailable(rd)
+        write(original, chunk)
+        write(io, chunk)
+        flush(original)
+        flush(io)
+    end
+    try
+        return f()
+    finally
+        redirect_stdout(original)
+        close(wr)
+        wait(copier)
+        close(io)
+    end
+end
+
+function calibration_log_path(targets::CalibrationTargets;
+                              log_dir = joinpath(@__DIR__, "calibration_results"))
+    s = SETTINGS
+    stamp = Dates.format(Dates.now(), "yyyy-mm-dd_HHMM")
+    return joinpath(log_dir,
+        "calib_$(targets.asset_moment)_J$(s.J)_nA$(s.nA)_nZ$(s.nZ)" *
+        "_nEps$(s.nEps)_nKappa$(s.nKappa)_$(stamp).txt")
+end
+
 if abspath(PROGRAM_FILE) == @__FILE__
-    result = calibrate_history_independent_tax()
-    print_equilibrium_summary(result.eq, result.params;
-                              title = "Final calibrated equilibrium",
-                              show_welfare = false)
+    targets = CalibrationTargets()
+    log_path = calibration_log_path(targets)
+    result = with_tee(log_path) do
+        r = calibrate_history_independent_tax(targets = targets)
+        print_equilibrium_summary(r.eq, r.params;
+                                  title = "Final calibrated equilibrium",
+                                  show_welfare = false)
+        r
+    end
+    println("\ntranscript saved to ", log_path)
 end

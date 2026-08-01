@@ -210,8 +210,6 @@ Base.@kwdef mutable struct HIStatsAccumulator
     borrowing_constraint_mass::Float64 = 0.0
     upper_bound_mass::Float64 = 0.0
     hours_upper_bound_mass::Float64 = 0.0
-    max_next_assets::Float64 = -Inf
-    max_hours::Float64 = -Inf
     max_material_next_assets::Float64 = -Inf
     max_material_hours::Float64 = -Inf
 end
@@ -229,8 +227,7 @@ const STATS_SUM_FIELDS =
      :sum_effective_borrowing_limit, :borrowing_limit_mass, :negative_asset_mass,
      :zero_asset_mass, :borrowing_constraint_mass, :upper_bound_mass,
      :hours_upper_bound_mass)
-const STATS_MAX_FIELDS =
-    (:max_next_assets, :max_hours, :max_material_next_assets, :max_material_hours)
+const STATS_MAX_FIELDS = (:max_material_next_assets, :max_material_hours)
 
 function merge_stats!(dest::HIStatsAccumulator, src::HIStatsAccumulator)
     length(dest.asset_mass) == length(src.asset_mass) ||
@@ -253,9 +250,9 @@ end
     solve_history_independent_tax(p::HIParams)
 
 Solve for `lambda`, household policies, age distributions, and aggregates.
-Returns `(eq, sol)`, where `eq` is a named tuple of equilibrium objects and
-`sol` contains policies only when `p.store_solutions = true`. Build `p` with
-`make_history_independent_params()`.
+Returns `eq`, a named tuple of equilibrium objects. Household policies are
+attached as `eq.solutions` when `p.store_solutions = true` (otherwise
+`eq.solutions === nothing`). Build `p` with `make_history_independent_params()`.
 """
 function solve_history_independent_tax(p::HIParams)
     start_time = time()
@@ -270,17 +267,17 @@ function solve_history_independent_tax(p::HIParams)
     # one full equilibrium -- the smallest-residual one seen. Keeping every `eq`
     # would hold the distribution arrays of each trial lambda in memory.
     eval_cache = Dict{Float64,Float64}()
-    best = Ref{Any}(nothing)   # (; lambda, residual, eq, sol)
+    best = Ref{Any}(nothing)   # (; lambda, residual, eq)
 
     function solve_at_lambda(lambda::Float64)
-        residual, eq, sol = government_residual_at_lambda(lambda, p)
+        residual, eq = government_residual_at_lambda(lambda, p)
         eval_cache[lambda] = residual
         incumbent = best[]
         if isfinite(residual) &&
            (incumbent === nothing || abs(residual) < abs(incumbent.residual))
-            best[] = (; lambda = lambda, residual = residual, eq = eq, sol = sol)
+            best[] = (; lambda = lambda, residual = residual, eq = eq)
         end
-        return residual, eq, sol
+        return residual, eq
     end
 
     function evaluate_lambda_residual(lambda::Float64)
@@ -291,7 +288,7 @@ function solve_history_independent_tax(p::HIParams)
     function evaluate_lambda_full(lambda::Float64)
         incumbent = best[]
         incumbent !== nothing && incumbent.lambda == lambda &&
-            return incumbent.residual, incumbent.eq, incumbent.sol
+            return incumbent.residual, incumbent.eq
         return solve_at_lambda(lambda)
     end
 
@@ -325,14 +322,11 @@ function solve_history_independent_tax(p::HIParams)
         end
         bracket = find_bracket(grid, residuals)
         if bracket === nothing
-            finite_idx = findall(isfinite, residuals)
-            if isempty(finite_idx)
+            best[] === nothing &&
                 error("Could not evaluate any finite government residual")
-            end
-            eq = attach_elapsed(best[].eq, start_time, p;
-                                converged = false,
-                                bracketWarning = true)
-            return eq, best[].sol
+            @warn "lambda solver: no sign change found; using best grid-search " *
+                  "lambda $(best[].lambda) with residual $(best[].residual)"
+            return attach_elapsed(best[].eq, start_time, p; converged = false)
         end
         i_low, i_high = bracket
         lambda_low, lambda_high = grid[i_low], grid[i_high]
@@ -341,20 +335,6 @@ function solve_history_independent_tax(p::HIParams)
             @printf("Using lambda bracket [%.8f, %.8f].\n", lambda_low, lambda_high)
             flush(stdout)
         end
-    end
-
-    if r_low == 0.0 || lambda_low == lambda_high
-        _, eq_low, sol_low = evaluate_lambda_full(Float64(lambda_low))
-        eq = attach_elapsed(eq_low, start_time, p;
-                            converged = isfinite(r_low) && abs(r_low) <= p.tolGovBudget,
-                            bracketWarning = false)
-        return eq, sol_low
-    elseif r_high == 0.0
-        _, eq_high, sol_high = evaluate_lambda_full(Float64(lambda_high))
-        eq = attach_elapsed(eq_high, start_time, p;
-                            converged = isfinite(r_high) && abs(r_high) <= p.tolGovBudget,
-                            bracketWarning = false)
-        return eq, sol_high
     end
 
     root_eval_count = Ref(0)
@@ -381,27 +361,20 @@ function solve_history_independent_tax(p::HIParams)
             xatol = p.tolLambda,
             maxevals = max(p.maxIterLambda, 20),
         )
-        r_root, eq_root, sol_root = evaluate_lambda_full(Float64(lambda_root))
+        r_root, eq_root = evaluate_lambda_full(Float64(lambda_root))
         if p.verbose
             @printf("lambda root: lambda=%.8f, residual=%.8e\n", lambda_root, r_root)
             flush(stdout)
         end
         converged = isfinite(r_root) && abs(r_root) <= p.tolGovBudget
-        eq = attach_elapsed(eq_root, start_time, p;
-                            converged = converged,
-                            bracketWarning = false,
-                            rootResidualWarning = !converged)
-        return eq, sol_root
+        converged ||
+            @warn "lambda solver: root residual $(r_root) exceeds tolerance $(p.tolGovBudget)"
+        return attach_elapsed(eq_root, start_time, p; converged = converged)
     catch err
-        if best[] === nothing
-            rethrow(err)
-        end
-        eq = attach_elapsed(best[].eq, start_time, p;
-                            converged = false,
-                            bracketWarning = false,
-                            rootSolverWarning = true,
-                            rootSolverError = sprint(showerror, err))
-        return eq, best[].sol
+        best[] === nothing && rethrow(err)
+        @warn "lambda solver: Brent failed; using best evaluated lambda " *
+              "$(best[].lambda) with residual $(best[].residual)" exception = err
+        return attach_elapsed(best[].eq, start_time, p; converged = false)
     end
 end
 
@@ -520,45 +493,18 @@ function print_welfare_summary(w)
     return nothing
 end
 
-function attach_elapsed(eq, start_time::Float64, p::HIParams; kwargs...)
+# Failure modes (no bracket, Brent throw, residual above tolerance) are reported
+# with @warn at the point of failure, so eq carries only `converged` beyond the
+# equilibrium objects themselves.
+function attach_elapsed(eq, start_time::Float64, p::HIParams; converged::Bool)
     elapsed = time() - start_time
-    eq_with_elapsed = merge(eq, (; kwargs..., elapsedSeconds = elapsed))
+    eq_out = merge(eq, (; converged = converged, elapsedSeconds = elapsed))
     if p.verbose
-        print_lambda_warnings(eq_with_elapsed)
-        print_upper_bound_warning(eq_with_elapsed.statistics)
+        print_upper_bound_warning(eq_out.statistics)
         @printf("total solve time          = %.3f seconds\n", elapsed)
         flush(stdout)
     end
-    return eq_with_elapsed
-end
-
-eq_flag(eq, field::Symbol) =
-    hasproperty(eq, field) && getproperty(eq, field) === true
-
-function print_lambda_warnings(eq)
-    has_warning = (hasproperty(eq, :converged) && eq.converged === false) ||
-                  eq_flag(eq, :bracketWarning) ||
-                  eq_flag(eq, :rootResidualWarning) ||
-                  eq_flag(eq, :rootSolverWarning)
-    has_warning || return nothing
-
-    println("WARNING: lambda solver returned an approximate solution.")
-    if eq_flag(eq, :bracketWarning)
-        @printf("  no sign change was found; using best grid-search lambda %.8f with residual %.8e\n",
-                eq.lambda, eq.govBudgetResidual)
-    end
-    if eq_flag(eq, :rootResidualWarning)
-        @printf("  root residual %.8e exceeds tolerance %.8e\n",
-                abs(eq.govBudgetResidual), eq.parameters.tolGovBudget)
-    end
-    if eq_flag(eq, :rootSolverWarning)
-        @printf("  Brent solver failed; using best evaluated lambda %.8f with residual %.8e\n",
-                eq.lambda, eq.govBudgetResidual)
-        if hasproperty(eq, :rootSolverError)
-            @printf("  solver error: %s\n", eq.rootSolverError)
-        end
-    end
-    flush(stdout)
+    return eq_out
 end
 
 function print_upper_bound_warning(s)
@@ -579,7 +525,7 @@ function print_upper_bound_warning(s)
 end
 
 function government_residual_at_lambda(lambda::Float64, p::HIParams)
-    aggs, stats, welfare, sol = solve_aggregates_for_lambda(lambda, p)
+    aggs, stats, welfare, solutions = solve_aggregates_for_lambda(lambda, p)
     nAge = p.J + 1
     lhs = 0.0
     for j in 1:nAge
@@ -602,9 +548,10 @@ function government_residual_at_lambda(lambda::Float64, p::HIParams)
         outputPV = discounted_sum(aggs.Y, p.qGov),
         statistics = stats,
         welfare = welfare,
+        solutions = solutions,
         parameters = p,
     )
-    return residual, eq, sol
+    return residual, eq
 end
 
 function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
@@ -991,8 +938,6 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                 if binding_age
                     stats.borrowing_limit_mass += weighted_mass
                 end
-                stats.max_next_assets = max(stats.max_next_assets, ap)
-                stats.max_hours = max(stats.max_hours, h)
                 if weighted_mass > upper_bound_share_tol()
                     stats.max_material_next_assets = max(stats.max_material_next_assets, ap)
                     stats.max_material_hours = max(stats.max_material_hours, h)
@@ -1103,7 +1048,7 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
         merge_stats!(stats_acc, stats_by_kappa[ik])
     end
 
-    sol = p.store_solutions ? (;
+    solutions = p.store_solutions ? (;
         lambda = lambda,
         policyAIndex_by_kappa = saved_policyAIndex,
         policyA_by_kappa = saved_policyA,
@@ -1112,13 +1057,13 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
         z_grid = p.z_grid,
         eps_grid = p.eps_grid,
         kappa_grid = p.kappa_grid,
-    ) : (; lambda = lambda)
+    ) : nothing
 
     stats = finalize_statistics(stats_acc, p)
     welfare = finalize_welfare(
         welfare_value_function_by_kappa, welfare_simulation_by_kappa, p,
     )
-    return (; C = C, H = H, Y = Y, A = A), stats, welfare, sol
+    return (; C = C, H = H, Y = Y, A = A), stats, welfare, solutions
 end
 
 function finalize_welfare(value_function_by_kappa::Vector{Float64},
@@ -1138,7 +1083,6 @@ function finalize_welfare(value_function_by_kappa::Vector{Float64},
         overallValueFunction = overall_value_function,
         overallSimulation = overall_simulation,
         overallDifference = overall_difference,
-        maxAbsDifferenceByKappa = maximum(abs.(difference_by_kappa)),
     )
 end
 
@@ -1156,8 +1100,6 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
     share_at_effective_borrowing_constraint = stats.borrowing_constraint_mass / total_mass
     share_at_asset_upper_bound = stats.upper_bound_mass / total_mass
     share_at_hours_upper_bound = stats.hours_upper_bound_mass / total_mass
-    max_next_assets = isfinite(stats.max_next_assets) ? stats.max_next_assets : NaN
-    max_hours = isfinite(stats.max_hours) ? stats.max_hours : NaN
     max_material_next_assets =
         isfinite(stats.max_material_next_assets) ? stats.max_material_next_assets : NaN
     max_material_hours = isfinite(stats.max_material_hours) ? stats.max_material_hours : NaN
@@ -1196,8 +1138,6 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
         shareAtHoursUpperBound = share_at_hours_upper_bound,
         assetUpperBound = asset_upper,
         hoursUpperBound = hours_upper,
-        maxNextAssets = max_next_assets,
-        maxHours = max_hours,
         maxMaterialNextAssets = max_material_next_assets,
         maxMaterialHours = max_material_hours,
         assetUpperBoundSlack = asset_upper_bound_slack,
@@ -1723,12 +1663,10 @@ end
 
 function find_bracket(grid, residuals)
     for i in 1:(length(grid) - 1)
-        if isfinite(residuals[i]) && isfinite(residuals[i + 1])
-            if residuals[i] == 0.0
-                return (i, i)
-            elseif sign(residuals[i]) != sign(residuals[i + 1])
-                return (i, i + 1)
-            end
+        # sign(0.0) is 0.0, so an exact zero at either end also brackets.
+        if isfinite(residuals[i]) && isfinite(residuals[i + 1]) &&
+           sign(residuals[i]) != sign(residuals[i + 1])
+            return (i, i + 1)
         end
     end
     return nothing
