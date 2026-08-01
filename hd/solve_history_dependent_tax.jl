@@ -360,6 +360,7 @@ mutable struct StatsAccumulator
     sum_labor_income::Float64
     sum_borrowing_limit::Float64
     sum_effective_borrowing_limit::Float64
+    borrowing_limit_mass::Float64
     negative_asset_mass::Float64
     zero_asset_mass::Float64
     borrowing_constraint_mass::Float64
@@ -375,7 +376,7 @@ function StatsAccumulator(nA::Int)
     nA > 0 || error("nA must be positive")
     return StatsAccumulator(
         zeros(nA), Float64[], Float64[], Float64[],
-        0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0, 0.0,
         -Inf, -Inf, -Inf, -Inf,
     )
@@ -393,6 +394,7 @@ function merge_stats!(dest::StatsAccumulator, src::StatsAccumulator)
     dest.sum_labor_income += src.sum_labor_income
     dest.sum_borrowing_limit += src.sum_borrowing_limit
     dest.sum_effective_borrowing_limit += src.sum_effective_borrowing_limit
+    dest.borrowing_limit_mass += src.borrowing_limit_mass
     dest.negative_asset_mass += src.negative_asset_mass
     dest.zero_asset_mass += src.zero_asset_mass
     dest.borrowing_constraint_mass += src.borrowing_constraint_mass
@@ -418,8 +420,13 @@ function finalize_statistics(stats::StatsAccumulator, p::HDParams)
     mean_assets = stats.sum_current_assets / total_mass
     mean_labor_income = stats.sum_labor_income / total_mass
     median_assets = StatsBase.median(p.a_grid, StatsBase.weights(stats.asset_mass))
-    mean_borrowing_limit = stats.sum_borrowing_limit / total_mass
-    mean_effective_borrowing_limit = stats.sum_effective_borrowing_limit / total_mass
+    # Both limits exist only at ages j = 0,...,J-1, so they are averaged over
+    # the mass of those ages rather than over the whole population (matching
+    # the history-independent solver).
+    mean_borrowing_limit = safe_ratio(stats.sum_borrowing_limit,
+                                      stats.borrowing_limit_mass)
+    mean_effective_borrowing_limit = safe_ratio(stats.sum_effective_borrowing_limit,
+                                                stats.borrowing_limit_mass)
     share_at_effective_borrowing_constraint = stats.borrowing_constraint_mass / total_mass
     share_at_asset_upper_bound = stats.upper_bound_mass / total_mass
     share_at_hours_upper_bound = stats.hours_upper_bound_mass / total_mass
@@ -769,10 +776,14 @@ function simulate_kappa!(C, H, Y, A, stats::StatsAccumulator,
         utility_weight = (1.0 - p.beta) * p.beta^(age - 1)
 
         for ie in 1:nE, iz in 1:nZ
-            lower_idx = age == nAge ? terminal_first_ap : first_ap[iz]
-            true_borrowing_limit = age == nAge ? 0.0 :
-                -p.bbar * exp(kappa + p.rho * p.z_grid[iz])
-            effective_borrowing_limit = -p.a_grid[lower_idx]
+            # A borrowing limit only exists before the terminal age, where
+            # a' >= 0 is imposed instead. Its mass is accumulated separately
+            # so the reported means average over ages j = 0,...,J-1 only.
+            binding_age = age < nAge
+            lower_idx = binding_age ? first_ap[iz] : terminal_first_ap
+            true_borrowing_limit = binding_age ?
+                -p.bbar * exp(kappa + p.rho * p.z_grid[iz]) : 0.0
+            effective_borrowing_limit = binding_age ? -p.a_grid[lower_idx] : 0.0
             m_base = kappa + p.z_grid[iz] + p.eps_grid[ie]
 
             for is2 in 1:nS2, is1 in 1:nS1
@@ -811,6 +822,9 @@ function simulate_kappa!(C, H, Y, A, stats::StatsAccumulator,
                     stats.sum_borrowing_limit += weighted_mass * true_borrowing_limit
                     stats.sum_effective_borrowing_limit +=
                         weighted_mass * effective_borrowing_limit
+                    if binding_age
+                        stats.borrowing_limit_mass += weighted_mass
+                    end
                     stats.max_next_assets = max(stats.max_next_assets, ap)
                     stats.max_hours = max(stats.max_hours, h)
                     if weighted_mass > upper_bound_share_tol()

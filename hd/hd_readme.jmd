@@ -1,0 +1,206 @@
+# 1. Setup
+Load the run file and activate the project environment. Includes flow one direction (`solve ← model_settings ← run`): the single `include` below defines the module `HistoryDependentTax`, the solver, and the settings. Plotting is a separate layer: `include("plot_history_dependent_tax.jl")` when needed. The code is fully standalone — it neither includes nor calls anything in `hi/`, and the module wrapper lets both solvers load in the same session without name collisions.
+
+**Start Julia with at least three threads.** The solver parallelizes over the `kappa` grid, so with the default `nKappa = 3` fewer threads leave whole `kappa` blocks running serially. Launch with `julia --project=. -t 3`, or set `JULIA_NUM_THREADS=3` in your shell profile; `julia.NumThreads` is the VS Code setting. More threads than `nKappa` buy nothing.
+
+```julia
+include("run_history_dependent_tax.jl")
+result = run_history_dependent_tax()
+```
+
+
+# 2. Model and solution method
+The model is the finite-horizon Bewley economy of `Bewley.tex` with a HISTORY-DEPENDENT tax function. The budget constraint is
+
+    c + q(a') a' <= lambda * exp( pow * (z + eps + kappa + alpha*s1 + (1-alpha)*s2) ) * h^pow + a,
+
+with `pow = (1 - tau) * theta0`, and the two past-income stocks follow
+
+    s1' = mu1 * (z + eps + kappa + ln h + s1),
+    s2' = mu2 * (z + eps + kappa + ln h + s2).
+
+`theta0` is never set directly: it is implied by the promise-keeping restriction
+
+    theta0 * ( alpha/(1 - beta*mu1) + (1-alpha)/(1 - beta*mu2) ) = 1.
+
+Setting `mu1 = mu2 = 0` (with `nS1 = nS2 = 1`) gives `theta0 = 1`, collapses the s-grids to the single point 0, and reproduces the history-independent model of Section 1.1 exactly.
+
+**Solution method.** Hours affect `s'` and are therefore intertemporal, so the static labor FOC used in `hi/` is invalid here. Instead `(a', h)` are chosen JOINTLY on grids against a continuation value bilinearly interpolated in `(s1', s2')`; the distribution uses the matching bilinear Young (1990) lottery. Two consequences:
+
+- There is no `labor_solver` or `asset_choice_method` choice — asset choice is always grid search and hours always live on `h_grid`. The hours grid is LOG-SPACED by default (`labor_grid_spacing = :log`): `s'` depends on `ln h` and income/disutility are power functions, so relative hours resolution is what matters.
+- The hours scan is accelerated by a rigorous Topkis monotonicity argument (`exploit_hours_monotonicity = true`): for fixed `a'`, the optimal hours index is nonincreasing in current assets. Set it to `false` only to cross-check against the unaccelerated scan; the optimum is identical.
+
+`s'` realizations outside the s-grids are clamped to the nearest bound; the clamped mass share is reported in `eq.sClampedMassShare` and warned about when it exceeds `1e-6`. With the default `hMin = s_hours_floor = 0.05` no clamping occurs from low hours.
+
+
+# 3. Running the model
+Make sure you are in the current directory of the repository, or adjust the path accordingly. `kwargs` override `HD_SETTINGS` in `model_settings.jl`:
+
+```julia
+include("run_history_dependent_tax.jl")
+result = run_history_dependent_tax()
+result = run_history_dependent_tax(nA = 41, J = 4, mu1 = 0.0)   # overrides
+```
+
+The main keyword arguments (defaults from `HD_SETTINGS`):
+- `J`: terminal age (default: `39`). **Cohorts are indexed from `0` through `J`, giving `J + 1 = 40` cohorts.**
+- `mu1`, `mu2`: persistence of the two past-income stocks (defaults: `0.30`, `0.05`; preliminary values, to be set from the optimal-tax proposition or calibrated later).
+- `alpha`: weight on `s1` in the tax base (default: `0.5`).
+- `nS1`, `nS2`: points on each s-grid (defaults: `7`, `7`). `nS1 = nS2 = 1` forces the degenerate grid `[0.0]`.
+- `nA`: number of asset-grid points (default: `101`).
+- `nZ`, `nEps`, `nKappa`: shock grid sizes (defaults: `5`, `5`, `3`).
+- `labor_grid_size`: points on the hours grid (default: `41` — coarser than in `hi/`, because the joint `(a', h)` search is roughly `nS1*nS2` times more expensive per state).
+- `qSav`, `qBorr`, `bbar`: prices and borrowing-limit scale (defaults are the values calibrated in `hi/`).
+
+Any other `HD_SETTINGS` entry may be passed the same way. `HD_SETTINGS` is the single source of truth: `HDParams` carries no defaults for these keywords, so a direct `HDParams()` call missing one fails fast with an `UndefKeywordError`. Only the derived shock means (`omega_mean = -sigma_omega^2/2` etc.), the empty-grid sentinels `a_grid`/`h_grid`, and the knobs `tauchen_width`/`z_initial` default inside the constructor.
+
+**History-independent limit check.** The standard consistency check solves the model at `mu1 = mu2 = 0` using ONLY this module and verifies that the value-function and simulation welfare agree and that no s-mass is clamped:
+
+```julia
+using .HistoryDependentTax
+eq0 = check_history_independent_limit()          # kwargs override HD_SETTINGS
+```
+
+
+# 4. Result structure
+`result` is a `NamedTuple` `(; eq, params)`. Throughout, `nAge = J + 1 = 40`: age-indexed vectors run over indices `1, …, J+1`, corresponding to economic ages `j = 0, …, J`.
+
+### `result.eq` — the equilibrium
+| Field                | Type                | Meaning                                                      |
+|----------------------|---------------------|--------------------------------------------------------------|
+| `lambda`             | `Float64`           | Tax-level parameter clearing the government budget           |
+| `govBudgetResidual`  | `Float64`           | `govBudgetLHS - govBudgetRHS`                                |
+| `govBudgetLHS`       | `Float64`           | `(1-qGov) Σ_j qGov^j (Y_j - C_j)`                            |
+| `govBudgetRHS`       | `Float64`           | `(1-qGov^nAge) G`                                            |
+| `C`, `H`, `Y`, `A`   | `Vec{Float64, nAge}`| Aggregate consumption, hours, labor income, assets by age    |
+| `consumptionPV`      | `Float64`           | `qGov`-discounted sum of `C`                                 |
+| `outputPV`           | `Float64`           | `qGov`-discounted sum of `Y`                                 |
+| `statistics`         | `NamedTuple`        | Cross-sectional statistics (see below)                       |
+| `welfare`            | `NamedTuple`        | Welfare by `kappa` and overall (see below)                   |
+| `sClampedMassShare`  | `Float64`           | Mass whose `s'` was clamped to the s-grid bounds             |
+| `parameters`         | `HDParams`          | Parameters used for this solve                               |
+| `converged`          | `Bool`              | `true` if `|govBudgetResidual| ≤ tolGovBudget`               |
+| `elapsedSeconds`     | `Float64`           | Wall-clock time of the solve                                 |
+
+On solver failure the best evaluated equilibrium is returned instead, with `converged = false` and one of the flags `bracketWarning` (no sign change found; best grid-search `lambda` used), `rootSolverWarning` (Brent failed), or `rootResidualWarning` (root found but residual above tolerance) attached; each is also printed as a warning. Unlike `hi/`, there is no `store_solutions` option and `eq` carries no `solutions` field.
+
+### `result.eq.statistics` — cross-sectional moments
+Same fields and semantics as the history-independent solver, so downstream statistics are directly comparable.
+| Field                                              | Meaning                                                |
+|----------------------------------------------------|--------------------------------------------------------|
+| `totalMass`                                        | Total population mass (normalization check)            |
+| `meanAssets`, `medianAssets`                       | Mean and mass-weighted median of `a`                   |
+| `meanLaborIncome`                                  | Mean labor income                                      |
+| `meanBorrowingLimit`                               | Mean true limit `-bbar·exp(kappa + rho z)` (see note)  |
+| `meanEffectiveGridBorrowingLimit`                  | Same after grid rounding                               |
+| `meanAssetsToMeanLaborIncome`                      | Mean-asset ratio                                       |
+| `medianAssetsToMeanLaborIncome`                    | Median-asset ratio                                     |
+| `meanBorrowingLimitToMeanLaborIncome`              | The "true borrowing limit" ratio                       |
+| `meanEffectiveGridBorrowingLimitToMeanLaborIncome` | Same, using the grid-rounded limit                     |
+| `shareNegativeLiquidAssets`                        | Share with `a < 0`                                     |
+| `shareZeroAssets`                                  | Share with `a = 0`                                     |
+| `shareAtEffectiveBorrowingConstraint`              | Share at the (grid) borrowing constraint               |
+| `assetUpperBound`, `hoursUpperBound`               | `aMax` and `hMax`                                      |
+| `shareAtAssetUpperBound`, `shareAtHoursUpperBound` | Mass sitting at each bound                             |
+| `maxNextAssets`, `maxHours`                        | Largest `a'` and `h` over all positive-mass cells      |
+| `maxMaterialNextAssets`, `maxMaterialHours`        | Same over cells with mass above `1e-8`                 |
+| `assetUpperBoundSlack`, `hoursUpperBoundSlack`     | Bound minus the material maximum                       |
+| `assetUpperBoundBinding`, `hoursUpperBoundBinding` | `Bool`, share above `1e-8`                             |
+| `upperBoundsBinding`                               | `Bool`, either of the two                              |
+| `unconditionalDistributions`                       | `NamedTuple`, see below                                |
+
+**Note on the borrowing-limit moment.** A borrowing limit exists only at ages `j = 0,…,J-1`; at the terminal age `j = J` the model imposes `a' ≥ 0` instead, so no limit is defined there. Both `meanBorrowingLimit` and `meanEffectiveGridBorrowingLimit` average over the mass of ages `j = 0,…,J-1`, excluding the terminal age rather than counting it as a zero — the same convention as `hi/`, so the ratios are directly comparable. The denominator of the ratios is unchanged: mean labor income remains the whole-population mean over all `nAge` ages.
+
+### `result.eq.statistics.unconditionalDistributions`
+Populated when `collect_distributions = true` (the default); with it off, the
+vectors are empty and only the asset-grid mass is filled.
+| Field                     | Meaning                                                   |
+|---------------------------|-----------------------------------------------------------|
+| `assetGrid`, `assetMass`  | Asset grid and the probability mass on each point         |
+| `assetMassTotal`          | `sum(assetMass)`; equals `totalMass`                      |
+| `hours`, `consumption`    | Observation-level `h` and `c`, one entry per visited cell |
+| `weights`                 | Matching observation weights                              |
+| `observationWeightTotal`  | `sum(weights)`; equals `totalMass`                        |
+
+### `result.eq.welfare`
+| Field                                      | Type                  | Meaning                                                 |
+|--------------------------------------------|-----------------------|---------------------------------------------------------|
+| `kappaGrid`, `kappaProbabilities`          | `Vec{Float64, nKappa}`| Permanent-shock grid and its probabilities              |
+| `valueFunctionByKappa`                     | `Vec{Float64}`        | Expected utility from the value function at `j = 0`     |
+| `simulationByKappa`                        | `Vec{Float64}`        | Same object accumulated through the simulation          |
+| `differenceByKappa`                        | `Vec{Float64}`        | Simulation minus value function; a check                |
+| `overallValueFunction`, `overallSimulation`| `Float64`             | `Pkappa`-weighted aggregates                            |
+| `overallDifference`                        | `Float64`             | Their difference; should be round-off, of order `1e-13` |
+| `maxAbsDifferenceByKappa`                  | `Float64`             | Largest per-`kappa` gap                                 |
+
+### `result.params` — the `HDParams` used
+Defaults in parentheses are the values in `HD_SETTINGS` (`model_settings.jl`), the only place model parameters are defined. Constructor keywords that are not stored as fields map into grids: `nS1`/`nS2` (7, 7) set the lengths of `s1_grid`/`s2_grid`, `labor_grid_size` (41) the length of `h_grid`, and `sigma_omega`/`sigma_epsilon`/`sigma_kappa` (`sqrt(0.017)`, `sqrt(0.081)`, `sqrt(0.101)`) with the derived means build the shock grids.
+| Field                        | Type                  | Meaning                                                        |
+|------------------------------|-----------------------|----------------------------------------------------------------|
+| `beta`                       | `Float64`             | Discount factor (0.96)                                         |
+| `eta`                        | `Float64`             | Inverse Frisch elasticity (2.0)                                |
+| `phi`                        | `Float64`             | Level of the disutility of hours (1.0)                         |
+| `tau`                        | `Float64`             | HSV progressivity (0.181)                                      |
+| `theta0`                     | `Float64`             | IMPLIED by the promise-keeping restriction; not settable       |
+| `alpha`                      | `Float64`             | Weight on `s1` in the tax base (0.5)                           |
+| `mu1`, `mu2`                 | `Float64`             | Persistence of `s1`, `s2` (0.30, 0.05)                         |
+| `pow`                        | `Float64`             | Hours exponent `(1 - tau) * theta0`; derived                   |
+| `J`                          | `Int`                 | Terminal age; `nAge = J+1` periods, `j = 0, …, J` (39)         |
+| `z_grid`, `Pz`, `z0_probs`   | grids                 | Persistent shock: grid, transition, `j = 0` distribution       |
+| `eps_grid`, `Peps`           | grids                 | Transitory-shock grid and i.i.d. probabilities                 |
+| `kappa_grid`, `Pkappa`       | grids                 | Permanent-shock grid and probabilities                         |
+| `z_discretization_method`    | `Symbol`              | `:rouwenhorst` (default) or `:tauchen`                         |
+| `tauchen_width`              | `Float64`             | Grid width in s.d., used only for `:tauchen` (3.0)             |
+| `rho`                        | `Float64`             | Persistence of `z`; also scales the borrowing limit (0.958)    |
+| `bbar`                       | `Float64`             | Borrowing-limit scale, `≤ 0` (calibrated in `hi/`: -0.1748)    |
+| `aMax`                       | `Float64`             | Upper bound of the asset grid (12.0)                           |
+| `nA`                         | `Int`                 | Number of asset-grid points (101)                              |
+| `a_grid`                     | `Vec{Float64, nA}`    | The grid itself; contains `0.0` exactly                        |
+| `asset_grid_method`          | `Symbol`              | `:nonuniform` (default) or `:linear`                           |
+| `asset_grid_curvature_borrow`| `Float64`             | Spacing curvature below zero (1.8)                             |
+| `asset_grid_curvature_save`  | `Float64`             | Spacing curvature above zero (2.5)                             |
+| `asset_grid_borrow_share`    | `Float64`             | Share of points on the borrowing side (0.35)                   |
+| `asset_grid_zero_share`      | `Float64`             | Share of points in the band around zero (0.30)                 |
+| `asset_grid_zero_width`      | `Float64`             | Width of that band (0.08)                                      |
+| `qBorr`                      | `Float64`             | Price of borrowing, `a' < 0` (calibrated in `hi/`: 0.9484)     |
+| `qSav`                       | `Float64`             | Price of saving, `a' ≥ 0` (calibrated in `hi/`: 1.0004)        |
+| `qGov`                       | `Float64`             | Government discount price in gbc (0.99)                        |
+| `G`                          | `Float64`             | Government spending per period; gbc right-hand side (0.0)      |
+| `hMin`, `hMax`               | `Float64`             | Hours bounds (0.05, 5.0)                                       |
+| `h_grid`                     | `Vec{Float64}`        | Hours grid; `labor_grid_size` points, log-spaced (41)          |
+| `h_grid_disutility`          | `Vec{Float64}`        | Precomputed `phi h^(1+eta)/(1+eta)`                            |
+| `log_h_grid`                 | `Vec{Float64}`        | Precomputed `ln h`                                             |
+| `h_income_power`             | `Vec{Float64}`        | Precomputed `h^pow`                                            |
+| `labor_grid_spacing`         | `Symbol`              | `:log` (default) or `:uniform`                                 |
+| `s1_grid`, `s2_grid`         | `Vec{Float64}`        | Linear past-income-stock grids; `[0.0]` when `mu = 0`          |
+| `s_factor`                   | `Mat{Float64}`        | Precomputed `exp(pow(alpha s1 + (1-alpha) s2))`                |
+| `s_hours_floor`              | `Float64`             | `ln h` floor for the s-grid BOUNDS only, not a constraint (0.05)|
+| `lambdaMin`, `lambdaMax`     | `Float64`             | `lambda` bracket (0.20, 2.50)                                  |
+| `nLambdaSearch`              | `Int`                 | Grid points in the fallback search (15)                        |
+| `maxIterLambda`              | `Int`                 | Iteration cap on the root find (60)                            |
+| `tolLambda`                  | `Float64`             | Tolerance on `lambda` itself (`1e-6`)                          |
+| `tolGovBudget`               | `Float64`             | Tolerance on gbc residual (`1e-6`)                             |
+| `verbose`                    | `Bool`                | Print the solver header and progress (`true`)                  |
+| `massTol`                    | `Float64`             | Mass below which a cell is dropped (`1e-14`)                   |
+| `collect_distributions`      | `Bool`                | Populate `unconditionalDistributions` (`true`)                 |
+| `exploit_hours_monotonicity` | `Bool`                | Topkis acceleration of the hours scan (`true`)                 |
+
+
+# 5. Saving and loading results
+`save_hd_result` writes the result to `results/` (gitignored) under a shell-safe filename built from the model dimensions; `load_hd_result` reads it back. Reloading requires the `HistoryDependentTax` module, so include the run file first.
+
+```julia
+path = save_hd_result(result)
+# results/result_mu1=0.300_mu2=0.050_J=39_nA=101_nS1=7_nS2=7_nZ=5_nEps=5_nKappa=3.jld2
+
+result2 = load_hd_result(path)     # (; eq, params)
+```
+
+
+# 6. Plotting
+The plotting function takes the result of a run and saves the standard figures (asset grid, age profiles of assets/hours/consumption, unconditional distributions of assets/hours/consumption) to `figures/`:
+```julia
+include("plot_history_dependent_tax.jl")
+plot_history_dependent_tax(result)
+```
+The hours histogram marks `hMax` so a binding hours bound is visible. Plotting the unconditional hours and consumption distributions requires `collect_distributions = true` (the default).
