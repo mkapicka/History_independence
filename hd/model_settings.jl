@@ -54,16 +54,30 @@ const HD_SETTINGS = (;
     qGov = 0.99,
     G = 0.0,
 
-    # labor: the joint (a', h) grid search is roughly nS1*nS2 times more
-    # expensive than the history-independent solver, so the hours grid is
-    # coarser here. The grid is LOG-SPACED (uniform in ln h), which matches
-    # the model: s' depends on ln h, and income/disutility are power
-    # functions, so relative hours resolution is what matters. hMin = 0.05
-    # (not 1e-8) keeps ln(hMin) finite-scaled and, together with
-    # s_hours_floor, guarantees every realizable s' lies inside the s-grids.
+    # labor: hours are chosen on this grid (the joint (a', h) search is the
+    # only option here, since hours move s' and the static labor FOC is
+    # invalid). The grid is LOG-SPACED (uniform in ln h), which matches the
+    # model: s' depends on ln h, and income/disutility are power functions,
+    # so relative hours resolution is what matters. hMin = 0.05 (not 1e-8)
+    # keeps ln(hMin) finite-scaled and, together with s_hours_floor,
+    # guarantees every realizable s' lies inside the s-grids.
+    #
+    # labor_grid_size drives the discretization error in hours: adjacent
+    # points differ by a factor of 1.122 at 41 points but only 1.047 at 101.
+    # Measured at mu1 = mu2 = 0 against the history-independent solver, whose
+    # continuous labor FOC gives mean assets / mean labor income = 0.58750135
+    # at these prices (nA = 101, J = 39):
+    #     nH =  41  ->  0.60017143  (+2.16%),  10s
+    #     nH = 101  ->  0.59306286  (+0.95%),  20s
+    #     nH = 161  ->  0.58814079  (+0.11%),  26s
+    #     nH = 321  ->  0.58782189  (+0.05%),  43s
+    # Convergence alternates in sign rather than decaying monotonically, as
+    # grid-rounding error does. Raise to 161 if the residual percent matters.
+    # The 41-point default predated the Topkis acceleration of the hours
+    # scan, which now prunes most of the extra work.
     hMin = 0.05,
     hMax = 5.0,
-    labor_grid_size = 41,
+    labor_grid_size = 101,
     labor_grid_spacing = :log,
 
     # rigorous acceleration of the hours scan (Topkis monotonicity of the
