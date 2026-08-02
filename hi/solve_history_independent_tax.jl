@@ -444,6 +444,11 @@ function print_equilibrium_summary(eq, p::HIParams;
     @printf("mean output                = %.8f\n", mean(eq.Y))
     @printf("mean consumption           = %.8f\n", mean(eq.C))
     @printf("terminal assets            = %.8f\n", eq.A[end])
+    # Printed with every digit (shortest representation that round-trips to
+    # the same Float64), so calibrated values can be copied back verbatim.
+    @printf("qSav                       = %s\n", p.qSav)
+    @printf("qBorr                      = %s\n", p.qBorr)
+    @printf("bbar                       = %s\n", p.bbar)
     if hasproperty(eq, :elapsedSeconds)
         @printf("solve time                 = %.3f seconds\n", eq.elapsedSeconds)
     end
