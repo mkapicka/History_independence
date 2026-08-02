@@ -398,12 +398,15 @@ function print_solver_options(p::HIParams)
         @printf("  asset_grid_zero_band        = share %.3f, width %.3f\n",
                 p.asset_grid_zero_share, p.asset_grid_zero_width)
     end
-    @printf("  asset_grid_bounds           = [%.6f, %.6f], bbar = %.6f\n",
-            minimum(p.a_grid), maximum(p.a_grid), p.bbar)
-    @printf("  qSav                        = %.6f  (price of saving,    a' >= 0)\n", p.qSav)
-    @printf("  qBorr                       = %.6f  (price of borrowing, a' < 0)\n", p.qBorr)
-    @printf("  qGov                        = %.6f  (government discount price)\n", p.qGov)
-    @printf("  G                           = %.6f  (government spending)\n", p.G)
+    @printf("  asset_grid_bounds           = [%.6f, %.6f]\n",
+            minimum(p.a_grid), maximum(p.a_grid))
+    # Calibrated inputs print with every digit (shortest representation that
+    # round-trips to the same Float64) so they can be copied back verbatim.
+    @printf("  bbar                        = %s\n", p.bbar)
+    @printf("  qSav                        = %-20s  (price of saving,    a' >= 0)\n", p.qSav)
+    @printf("  qBorr                       = %-20s  (price of borrowing, a' < 0)\n", p.qBorr)
+    @printf("  qGov                        = %-20.6f  (government discount price)\n", p.qGov)
+    @printf("  G                           = %-20.6f  (government spending)\n", p.G)
     @printf("  asset_choice_method         = :%s  (alternatives: :grid_search, :interpolate)\n",
             String(p.asset_choice_method))
     if p.asset_choice_method == :interpolate

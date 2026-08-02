@@ -1097,7 +1097,9 @@ function print_solver_options(p::HDParams)
             minimum(p.a_grid), maximum(p.a_grid))
     @printf("  asset grid method             = :%s  (alternatives: :nonuniform, :linear)\n",
             String(p.asset_grid_method))
-    @printf("  bbar                          = %.6f\n", p.bbar)
+    # Calibrated inputs print with every digit (shortest representation that
+    # round-trips to the same Float64) so they can be copied back verbatim.
+    @printf("  bbar                          = %s\n", p.bbar)
     @printf("  labor grid size               = %d on [%.4f, %.4f]\n",
             length(p.h_grid), p.hMin, p.hMax)
     @printf("  labor grid spacing            = :%s  (alternatives: :log, :uniform)\n",
@@ -1112,8 +1114,8 @@ function print_solver_options(p::HDParams)
     @printf("  labor history 2 bounds        = [%.4f, %.4f]\n",
             p.s2_grid[1], p.s2_grid[end])
     @printf("  labor history 2 grid method   = :linear\n")
-    @printf("  qSav                          = %.6f\n", p.qSav)
-    @printf("  qBorr                         = %.6f\n", p.qBorr)
+    @printf("  qSav                          = %s\n", p.qSav)
+    @printf("  qBorr                         = %s\n", p.qBorr)
     @printf("  theta0 (implied)              = %.6f\n", p.theta0)
     @printf("  alpha                         = %.6f\n", p.alpha)
     @printf("  mu1, mu2                      = %.6f, %.6f\n", p.mu1, p.mu2)
