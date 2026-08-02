@@ -548,7 +548,154 @@ end
 # -----------------------------------------------------------------------------
 # Backward induction for one kappa: joint (a', h) grid choice with bilinear
 # interpolation of the continuation value in (s1', s2')
+#
+# Parallelism lives HERE, over the nEps*nS1*nS2 blocks of (eps, s1, s2) at each
+# (age, z), not over kappa: nKappa is typically 3, which caps a kappa-threaded
+# solver at 3 cores. Blocks write disjoint slices of Vcur/policyAIndex/policyH
+# and only read the shared EVz, so the result is independent of the schedule
+# and bit-for-bit identical to a serial run.
 # -----------------------------------------------------------------------------
+
+# Per-thread scratch. EVh starts zeroed because the terminal age is solved
+# first and reads it as the (zero) continuation without writing it.
+struct BlockScratch
+    inc::Vector{Float64}
+    l1v::Vector{Int}
+    h1v::Vector{Int}
+    w1v::Vector{Float64}
+    l2v::Vector{Int}
+    h2v::Vector{Int}
+    w2v::Vector{Float64}
+    ih_ub::Vector{Int}          # monotone upper bound on optimal ih, per a'
+    EVh::Matrix{Float64}        # EV at (h, a')
+end
+
+function BlockScratch(nH::Int, nA::Int)
+    return BlockScratch(
+        Vector{Float64}(undef, nH),
+        Vector{Int}(undef, nH), Vector{Int}(undef, nH), Vector{Float64}(undef, nH),
+        Vector{Int}(undef, nH), Vector{Int}(undef, nH), Vector{Float64}(undef, nH),
+        Vector{Int}(undef, nA), zeros(nH, nA),
+    )
+end
+
+"""
+    solve_block!(...)
+
+Solve one (eps, s1, s2) block at a given (age, z): fill `EVh` by bilinear
+interpolation of the continuation in (s1', s2'), then choose (a', h) jointly
+on the grids for every current asset level.
+
+The hours scan is accelerated by Topkis monotonicity
+(`exploit_hours_monotonicity`), documented at the scan itself. A tangent-line
+pre-filter on `log` was tried here and removed: profiling puts `log` at about
+half of runtime, but the bound costs a multiply, an add, and a branch per
+candidate, which measured 7% SLOWER than simply calling `log`.
+"""
+function solve_block!(Vcur, policyAIndex, policyH, sc::BlockScratch,
+                      EVz, cash, ie::Int, is1::Int, is2::Int, iz::Int,
+                      age::Int, ia_first::Int, has_continuation::Bool,
+                      m_base::Float64, coeff::Float64, p::HDParams)
+    nA = size(cash, 1)
+    nH = length(p.h_grid)
+    dis = p.h_grid_disutility
+    hpow = p.h_income_power
+    lnh = p.log_h_grid
+    beta = p.beta
+    util_weight = 1.0 - beta
+    inc = sc.inc
+    EVh = sc.EVh
+    ih_ub = sc.ih_ub
+
+    @inbounds begin
+        for ih in 1:nH
+            inc[ih] = coeff * hpow[ih]
+        end
+        inc_max = inc[nH]
+
+        if has_continuation
+            l1v, h1v, w1v = sc.l1v, sc.h1v, sc.w1v
+            l2v, h2v, w2v = sc.l2v, sc.h2v, sc.w2v
+            for ih in 1:nH
+                s1n = p.mu1 * (m_base + lnh[ih] + p.s1_grid[is1])
+                s2n = p.mu2 * (m_base + lnh[ih] + p.s2_grid[is2])
+                l1v[ih], h1v[ih], w1v[ih] = grid_lookup_weights(p.s1_grid, s1n)
+                l2v[ih], h2v[ih], w2v[ih] = grid_lookup_weights(p.s2_grid, s2n)
+            end
+            for ih in 1:nH
+                l1, h1, w1 = l1v[ih], h1v[ih], w1v[ih]
+                l2, h2, w2 = l2v[ih], h2v[ih], w2v[ih]
+                w11 = (1.0 - w1) * (1.0 - w2)
+                w12 = (1.0 - w1) * w2
+                w21 = w1 * (1.0 - w2)
+                w22 = w1 * w2
+                for iap in ia_first:nA
+                    EVh[ih, iap] =
+                        w11 * EVz[iap, l1, l2] +
+                        w12 * EVz[iap, l1, h2] +
+                        w21 * EVz[iap, h1, l2] +
+                        w22 * EVz[iap, h1, h2]
+                end
+            end
+        end
+
+        # Optimal-hours monotonicity (Topkis): for fixed a' (so a fixed EVh
+        # column), the objective has decreasing differences in (h, cash)
+        # because d^2 ln(cash + inc(h)) / d inc d cash < 0 and inc is
+        # increasing in h, while the continuation term does not depend on
+        # cash. Since cash[iap, ia] is strictly increasing in ia, the
+        # (largest) maximizing hours index is nonincreasing in ia for each
+        # iap. Scanning ia in ascending order, the previous optimum at the
+        # same iap is therefore a valid upper bound for the hours scan.
+        exploit = p.exploit_hours_monotonicity
+        exploit && fill!(ih_ub, nH)
+
+        for ia in 1:nA
+            best_val = VINFEASIBLE
+            best_iap = ia_first
+            best_ih = nH
+
+            for iap in ia_first:nA
+                cash_v = cash[iap, ia]
+                # cash is decreasing in a' (q > 0 on both sides of zero and
+                # continuous there), so once maximal hours cannot deliver
+                # c > 0, no larger a' can.
+                if cash_v + inc_max <= 0.0
+                    break
+                end
+                ih0 = cash_v > 0.0 ? 1 : searchsortedfirst(inc, -cash_v)
+                ub = exploit ? max(ih_ub[iap], ih0) : nH
+
+                local_best = VINFEASIBLE
+                local_ih = ub
+                for ih in ih0:ub
+                    c = cash_v + inc[ih]
+                    c <= 0.0 && continue
+                    val = util_weight * (log(c) - dis[ih]) + beta * EVh[ih, iap]
+                    # ">=" selects the LARGEST maximizer, as the monotone
+                    # bound requires.
+                    if val >= local_best
+                        local_best = val
+                        local_ih = ih
+                    end
+                end
+                exploit && (ih_ub[iap] = local_ih)
+
+                if local_best > best_val
+                    best_val = local_best
+                    best_iap = iap
+                    best_ih = local_ih
+                end
+            end
+
+            Vcur[ia, is1, is2, iz, ie] = best_val
+            policyAIndex[ia, is1, is2, iz, ie, age] = Int32(best_iap)
+            policyH[ia, is1, is2, iz, ie, age] = p.h_grid[best_ih]
+        end
+    end
+    return nothing
+end
+
 function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
                                   first_ap::Vector{Int},
                                   terminal_first_ap::Int,
@@ -561,17 +708,11 @@ function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
     nS2 = length(p.s2_grid)
     nAge = p.J + 1
     nH = length(p.h_grid)
-    dis = p.h_grid_disutility
-    hpow = p.h_income_power
-    lnh = p.log_h_grid
-    beta = p.beta
-    util_weight = 1.0 - beta
 
     Vnext = zeros(nA, nS1, nS2, nZ, nE)     # terminal continuation V_{J+2} = 0
     Vcur = similar(Vnext)
     Vbar = Array{Float64}(undef, nA, nS1, nS2, nZ)   # sum over eps'
     EVz = Array{Float64}(undef, nA, nS1, nS2)        # sum over z' given z
-    EVh = Matrix{Float64}(undef, nH, nA)             # EV at (h, a')
 
     policyAIndex = Array{Int32}(undef, nA, nS1, nS2, nZ, nE, nAge)
     policyH = Array{Float64}(undef, nA, nS1, nS2, nZ, nE, nAge)
@@ -581,20 +722,20 @@ function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
         cash[iap, ia] = p.a_grid[ia] - q_by_ap[iap] * p.a_grid[iap]
     end
 
-    inc = Vector{Float64}(undef, nH)
-    l1v = Vector{Int}(undef, nH); h1v = Vector{Int}(undef, nH)
-    w1v = Vector{Float64}(undef, nH)
-    l2v = Vector{Int}(undef, nH); h2v = Vector{Int}(undef, nH)
-    w2v = Vector{Float64}(undef, nH)
-    ih_ub = Vector{Int}(undef, nA)   # monotone upper bound on optimal ih, per a'
+    # One scratch set per thread; blocks are handed out with :static
+    # scheduling, so threadid() is stable for the duration of each loop.
+    # Size by maxthreadid(), not nthreads(): the interactive threadpool
+    # carries ids above the default pool's count.
+    scratch = [BlockScratch(nH, nA) for _ in 1:Threads.maxthreadid()]
+    blocks = [(ie, is1, is2) for is2 in 1:nS2 for is1 in 1:nS1 for ie in 1:nE]
+    nBlocks = length(blocks)
 
-    @inbounds for age in nAge:-1:1
+    for age in nAge:-1:1
         has_continuation = age < nAge
-        has_continuation || fill!(EVh, 0.0)   # terminal: continuation is zero
 
         if has_continuation
             fill!(Vbar, 0.0)
-            for ie in 1:nE
+            @inbounds for ie in 1:nE
                 Vbar .+= p.Peps[ie] .* view(Vnext, :, :, :, :, ie)
             end
         end
@@ -604,107 +745,21 @@ function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
 
             if has_continuation
                 fill!(EVz, 0.0)
-                for izp in 1:nZ
+                @inbounds for izp in 1:nZ
                     pz = p.Pz[iz, izp]
                     pz == 0.0 && continue
                     EVz .+= pz .* view(Vbar, :, :, :, izp)
                 end
             end
 
-            for ie in 1:nE
+            Threads.@threads :static for ib in 1:nBlocks
+                ie, is1, is2 = blocks[ib]
+                sc = scratch[Threads.threadid()]
                 m_base = kappa + p.z_grid[iz] + p.eps_grid[ie]
-
-                for is2 in 1:nS2, is1 in 1:nS1
-                    coeff = lambda * tax_base[iz, ie] * p.s_factor[is1, is2]
-                    for ih in 1:nH
-                        inc[ih] = coeff * hpow[ih]
-                    end
-                    inc_max = inc[nH]
-
-                    if has_continuation
-                        for ih in 1:nH
-                            s1n = p.mu1 * (m_base + lnh[ih] + p.s1_grid[is1])
-                            s2n = p.mu2 * (m_base + lnh[ih] + p.s2_grid[is2])
-                            l1v[ih], h1v[ih], w1v[ih] =
-                                grid_lookup_weights(p.s1_grid, s1n)
-                            l2v[ih], h2v[ih], w2v[ih] =
-                                grid_lookup_weights(p.s2_grid, s2n)
-                        end
-                        for ih in 1:nH
-                            l1, h1, w1 = l1v[ih], h1v[ih], w1v[ih]
-                            l2, h2, w2 = l2v[ih], h2v[ih], w2v[ih]
-                            w11 = (1.0 - w1) * (1.0 - w2)
-                            w12 = (1.0 - w1) * w2
-                            w21 = w1 * (1.0 - w2)
-                            w22 = w1 * w2
-                            for iap in ia_first:nA
-                                EVh[ih, iap] =
-                                    w11 * EVz[iap, l1, l2] +
-                                    w12 * EVz[iap, l1, h2] +
-                                    w21 * EVz[iap, h1, l2] +
-                                    w22 * EVz[iap, h1, h2]
-                            end
-                        end
-                    end
-
-                    # Optimal-hours monotonicity (Topkis): for fixed a' (so a
-                    # fixed EVh column), the objective has decreasing
-                    # differences in (h, cash) because
-                    # d^2 ln(cash + inc(h)) / d inc d cash < 0 and inc is
-                    # increasing in h, while the continuation term does not
-                    # depend on cash. Since cash[iap, ia] is strictly
-                    # increasing in ia, the (largest) maximizing hours index
-                    # is nonincreasing in ia for each iap. Scanning ia in
-                    # ascending order, the previous optimum at the same iap is
-                    # therefore a valid upper bound for the hours scan.
-                    exploit = p.exploit_hours_monotonicity
-                    exploit && fill!(ih_ub, nH)
-
-                    for ia in 1:nA
-                        best_val = VINFEASIBLE
-                        best_iap = ia_first
-                        best_ih = nH
-
-                        for iap in ia_first:nA
-                            cash_v = cash[iap, ia]
-                            # cash is decreasing in a' (q > 0 on both sides of
-                            # zero and continuous there), so once maximal hours
-                            # cannot deliver c > 0, no larger a' can.
-                            if cash_v + inc_max <= 0.0
-                                break
-                            end
-                            ih0 = cash_v > 0.0 ? 1 :
-                                  searchsortedfirst(inc, -cash_v)
-                            ub = exploit ? max(ih_ub[iap], ih0) : nH
-
-                            local_best = VINFEASIBLE
-                            local_ih = ub
-                            for ih in ih0:ub
-                                c = cash_v + inc[ih]
-                                c <= 0.0 && continue
-                                val = util_weight * (log(c) - dis[ih]) +
-                                      beta * EVh[ih, iap]
-                                # ">=" selects the LARGEST maximizer, as the
-                                # monotone bound requires.
-                                if val >= local_best
-                                    local_best = val
-                                    local_ih = ih
-                                end
-                            end
-                            exploit && (ih_ub[iap] = local_ih)
-
-                            if local_best > best_val
-                                best_val = local_best
-                                best_iap = iap
-                                best_ih = local_ih
-                            end
-                        end
-
-                        Vcur[ia, is1, is2, iz, ie] = best_val
-                        policyAIndex[ia, is1, is2, iz, ie, age] = Int32(best_iap)
-                        policyH[ia, is1, is2, iz, ie, age] = p.h_grid[best_ih]
-                    end
-                end
+                coeff = lambda * tax_base[iz, ie] * p.s_factor[is1, is2]
+                solve_block!(Vcur, policyAIndex, policyH, sc, EVz, cash,
+                             ie, is1, is2, iz, age, ia_first,
+                             has_continuation, m_base, coeff, p)
             end
         end
 
@@ -886,7 +941,9 @@ function simulate_kappa!(C, H, Y, A, stats::StatsAccumulator,
 end
 
 # -----------------------------------------------------------------------------
-# Aggregates at a given lambda (threaded over kappa) and government residual
+# Aggregates at a given lambda and the government-budget residual. Policies
+# are solved kappa-by-kappa (each solve is internally threaded over blocks);
+# the forward distribution is then threaded over kappa.
 # -----------------------------------------------------------------------------
 function solve_aggregates_for_lambda(lambda::Float64, p::HDParams)
     nAge = p.J + 1
@@ -906,23 +963,37 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HDParams)
     q_by_ap = asset_prices(p)
     terminal_first_ap = first_nonnegative_asset_index(p)
 
-    Threads.@threads :static for ik in 1:nKappa
+    # Phase 1: policies. kappa runs SERIALLY because solve_policies_for_kappa
+    # is itself threaded over the nEps*nS1*nS2 blocks, which offers far more
+    # parallelism than the nKappa (typically 3) values ever could.
+    policyA_by_kappa = Vector{Array{Int32,6}}(undef, nKappa)
+    policyH_by_kappa = Vector{Array{Float64,6}}(undef, nKappa)
+    first_ap_by_kappa = Vector{Vector{Int}}(undef, nKappa)
+    tax_base_by_kappa = Vector{Matrix{Float64}}(undef, nKappa)
+    wage_base_by_kappa = Vector{Matrix{Float64}}(undef, nKappa)
+    for ik in 1:nKappa
         kappa = p.kappa_grid[ik]
-        pkappa = p.Pkappa[ik]
-        first_ap = first_feasible_asset_indices(kappa, p)
-        tax_base, wage_base = precompute_income_bases(kappa, p)
-        policyAIndex, policyH, welfare_value_function =
-            solve_policies_for_kappa(lambda, kappa, first_ap,
-                                     terminal_first_ap, q_by_ap, tax_base, p)
+        first_ap_by_kappa[ik] = first_feasible_asset_indices(kappa, p)
+        tax_base_by_kappa[ik], wage_base_by_kappa[ik] =
+            precompute_income_bases(kappa, p)
+        policyA_by_kappa[ik], policyH_by_kappa[ik],
+        welfare_value_function_by_kappa[ik] =
+            solve_policies_for_kappa(lambda, kappa, first_ap_by_kappa[ik],
+                                     terminal_first_ap, q_by_ap,
+                                     tax_base_by_kappa[ik], p)
+    end
+
+    # Phase 2: the forward distribution, which is independent across kappa.
+    Threads.@threads :static for ik in 1:nKappa
         stats_local = StatsAccumulator(length(p.a_grid))
         welfare_simulation, clamped = simulate_kappa!(
             C_by_kappa[ik], H_by_kappa[ik], Y_by_kappa[ik], A_by_kappa[ik],
-            stats_local, policyAIndex, policyH, kappa, pkappa,
-            first_ap, terminal_first_ap, q_by_ap, tax_base, wage_base,
-            p, lambda,
+            stats_local, policyA_by_kappa[ik], policyH_by_kappa[ik],
+            p.kappa_grid[ik], p.Pkappa[ik],
+            first_ap_by_kappa[ik], terminal_first_ap, q_by_ap,
+            tax_base_by_kappa[ik], wage_base_by_kappa[ik], p, lambda,
         )
         stats_by_kappa[ik] = stats_local
-        welfare_value_function_by_kappa[ik] = welfare_value_function
         welfare_simulation_by_kappa[ik] = welfare_simulation
         clamped_by_kappa[ik] = clamped
     end
