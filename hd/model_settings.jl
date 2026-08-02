@@ -38,8 +38,8 @@ const HD_SETTINGS = (;
     z_discretization_method = :rouwenhorst,
 
     # asset grid
-    bbar = -0.1747771615355756,
-    aMax = 12.0,
+    bbar = -0.17014842731387517,
+    aMax = 15.0,
     nA = 101,
     asset_grid_method = :nonuniform,
     asset_grid_curvature_borrow = 1.8,
@@ -49,8 +49,8 @@ const HD_SETTINGS = (;
     asset_grid_zero_width = 0.08,
 
     # financial and government
-    qBorr = 0.9484058794159081,
-    qSav = 1.000389811142351,
+    qBorr = 1.0123473140001613,
+    qSav = 0.9723466284755885,
     qGov = 0.99,
     G = 0.0,
 
