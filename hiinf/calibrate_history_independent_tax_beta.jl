@@ -12,31 +12,6 @@
 # the prices fixed there is no qBorr left to move it.
 #
 # -----------------------------------------------------------------------------
-# WHY CALIBRATE BETA RATHER THAN A PRICE
-# -----------------------------------------------------------------------------
-# The one-price file solves the government-budget wedge by tying qSav = qBorr =
-# qGov = q and then calibrating q to the asset moment. That works, but it spends
-# the price on a wealth moment: the interest rate the model runs at is whatever
-# the asset target dictates, and cannot be set to the rate the exercise wants.
-# Here the assignment is reversed. The prices are inputs -- set them to 0.99,
-# or to the same value everywhere for an exact telescoping, or to a measured
-# spread -- and the asset moment is matched by the discount factor instead.
-#
-# The two files answer different questions. Use the one-price file when the
-# interest rate is free and the asset moment must hold; use this one when the
-# interest rate is part of the experiment and preferences absorb the residual.
-#
-# THE GOVERNMENT BUDGET IS NOT AUTOMATICALLY CLEAN HERE. The telescoping
-# argument in the one-price header is a statement about prices, not about beta:
-#
-#   PV(Y - C) = PV(T) - A_1 - sum_j qGov^(j-1) (qGov - q_j) A_(j+1),
-#
-# so PV(Y - C) = G is the government budget ONLY when q_j = qGov at every state.
-# Calibrating beta does nothing to that wedge. If the exercise needs the budget
-# to be exact, pass qSav = qBorr = qGov; the result print reports the residual
-# either way and says which case it is in.
-#
-# -----------------------------------------------------------------------------
 # IDENTIFICATION
 # -----------------------------------------------------------------------------
 # Two blocks, swept in this order:
@@ -81,20 +56,6 @@
 # flags it when it is short, so this is judged per run rather than guessed.
 #
 # -----------------------------------------------------------------------------
-# WHAT CHANGES WHEN BETA MOVES, BEYOND THE ASSET DISTRIBUTION
-# -----------------------------------------------------------------------------
-# Flow utility is normalized in the solver as
-#
-#   V = (1 - beta) * (log c - phi h^(1+eta)/(1+eta)) + beta * E[V'],
-#
-# so V is a per-period equivalent and the welfare simulation weights ages by
-# (1 - beta) * beta^(age-1). Both the normalization and the age weights are
-# functions of beta. Welfare numbers from two calibrations with DIFFERENT
-# calibrated betas are therefore not the same functional evaluated at two
-# points, and differencing them is not a welfare comparison. Within one
-# calibrated beta -- comparing tax systems, say -- nothing changes.
-#
-# -----------------------------------------------------------------------------
 # USAGE
 # -----------------------------------------------------------------------------
 #   include("calibrate_history_independent_tax_beta.jl")
@@ -118,6 +79,10 @@
 # Returns `(; beta, bbar, qSav, qBorr, qGov, eq, moments, residuals, converged,
 #            stalled, sweeps, nSolves, elapsedSeconds, calib, params)`.
 # Marek Kapicka, 2026
+#
+# Passages on the choice of instrument, the beta ceiling and the access
+# chain are in NOTES.md.
+#
 # =============================================================================
 
 # Reuses `solve_scalar`, `moments_from` and the solver entry points from the

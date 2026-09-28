@@ -90,31 +90,13 @@ const SETTINGS = (;
     nA = 101,
 
     # Asset-market access (psmodel.tex: s and h). pSS = Pr(stay saver),
-    # pHH = Pr(stay hand-to-mouth). The stationary HtM share is
-    #     piH = (1 - pSS) / (2 - pSS - pHH),
-    # printed in the options header, and the initial cross-section is drawn
-    # from it, so the HtM share is constant over the life cycle.
-    #
-    # CALIBRATED TO KAPLAN, VIOLANTE AND WEIDNER (2014), THEIR TABLE 4 -- the
-    # printed SCF 2007-2009 two-year transition matrix across poor-HtM,
-    # wealthy-HtM and non-HtM status. Collapsing P and W into H, weighting the
-    # two rows by their ergodic mass, gives a two-year chain pSS = 0.8160,
-    # pHH = 0.6029 whose stationary HtM share is 0.3166 against the 0.317 the
-    # paper reports. Annualizing preserves the stationary distribution and
-    # takes the square root of the second eigenvalue, 0.4189 -> 0.6472, which
-    # gives the two numbers below. See references/KVW2014_WealthyHandToMouth/.
-    #
-    # WHY NOT THE IID RESTRICTION. pHH = 1 - pSS was the earlier default and
-    # matched the one-third aggregate share, but it forces the second
-    # eigenvalue to zero: an expected HtM spell of 1.50 years against the 4.15
-    # implied here, and against the 3.5 (W-HtM) and 4.5 (P-HtM) the paper
-    # states directly. Persistence is a separate moment from the share, and
-    # Table 4 identifies it.
-    #
-    # The implied spells are 4.15 years in H and 8.95 years in S. Note the
-    # paper's age profile is NOT flat -- total HtM falls from about 50 percent
-    # at age 22 to about 20 percent in retirement (their Figure 6) -- while
-    # this chain is stationary by construction, so piH is a life-cycle average.
+    # pHH = Pr(stay hand-to-mouth), with stationary HtM share
+    #     piH = (1 - pSS) / (2 - pSS - pHH).
+    # The initial cross-section is drawn from it, so the share is constant over
+    # the life cycle. Calibrated to Kaplan, Violante and Weidner (2014), their
+    # Table 4, collapsed to two states and annualized; the iid restriction
+    # pHH = 1 - pSS matches the share but forces zero persistence. See
+    # NOTES.md and references/KVW2014_WealthyHandToMouth/.
     #
     #     pSS = 1.00,  pHH = 0.00   -> piH = 0       switches HtM off entirely
     #     pSS = 0.00,  pHH = 1.00   -> piH = 1       everyone hand-to-mouth

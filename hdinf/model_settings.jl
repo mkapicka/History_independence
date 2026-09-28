@@ -58,26 +58,19 @@ const HD_SETTINGS = (;
     # alpha = 0.5 to set it independently.
     alpha = :paper,
 
-    # INFINITE HORIZON. No J: the agent's problem is stationary, so V and the
-    # policies carry no age index. What remains are solver controls.
+    # Infinite horizon: no J, so V and the policies carry no age index. What
+    # remains are solver controls.
     #
-    #   maxAge      cap on the FORWARD pass, which still runs age by age from
-    #               the birth condition because aggregates vary over the life
-    #               cycle and the government budget is a present value. The
-    #               pass stops early once the cross-section settles (tolDist)
-    #               and the discounted tail is then summed in closed form, so
-    #               maxAge is a safety net rather than the usual stopping rule.
+    #   maxAge      cap on the FORWARD pass, which still runs age by age
+    #               because the government budget is a present value. A safety
+    #               net: the pass stops once the cross-section settles.
     #   tolV        sup-norm tolerance on the value function.
     #   maxIterV    cap on maximizing sweeps.
-    #   howardSteps policy-evaluation sweeps between maximizations. 0 gives
-    #               plain VFI, which contracts at beta = 0.96 and so needs
-    #               ln(tol)/ln(beta) ~ 451 sweeps at tol = 1e-8 -- far more
-    #               than the 100 age sweeps of the J = 99 finite model. With
-    #               Howard the expensive maximizations number a few dozen.
-    #               Both settings must reach the same fixed point; disagreement
-    #               is a bug, and comparing them is the cheapest check there is.
-    #   tolDist     drift in (Y_j, C_j) below which the cross-section counts as
-    #               settled and the PV tail is closed analytically.
+    #   howardSteps policy-evaluation sweeps between maximizations; 0 gives
+    #               plain VFI. Both must reach the same fixed point, and
+    #               comparing them is the cheapest check available.
+    #   tolDist     drift in (Y_j, C_j) below which the cross-section counts
+    #               as settled and the PV tail is closed analytically.
     maxAge = 600,
 
     # Households are born at real age age0_real, which is model age 1: real age

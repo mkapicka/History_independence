@@ -1379,30 +1379,11 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
 
         dist, dist_next = dist_next, dist
 
-        # Record where the cross-section settles, but DO NOT stop here. An
-        # earlier version broke out of the loop at this point, which was a
-        # speed optimization that corrupted everything downstream of the
-        # profiles:
-        #
-        #   * C/H/Y/A keep their `zeros(maxAge)` initialization past the break,
-        #     so the age profiles fell off a cliff to exactly 0.0 -- array
-        #     initialization presented as model output;
-        #   * each kappa settles at its own age and the aggregates are summed
-        #     ACROSS kappa, so ages between the earliest and latest settled age
-        #     held partial sums over only the kappas still running. The
-        #     government budget read exactly that band, since it sums to Jc;
-        #   * `discounted_sum` walks the whole maxAge-long array, so
-        #     consumptionPV and outputPV were summing that zero tail;
-        #   * worst, the `stats` accumulator also stopped, so each kappa
-        #     contributed settled_age ages of mass and meanAssets came out
-        #     weighted by settled age rather than by Pkappa. total_mass would
-        #     be an integer if every kappa ran the same number of ages; it came
-        #     out at 417.166667, which is the tell.
-        #
-        # Running every kappa the full maxAge fixes all four at once and costs
-        # only the ages past settlement in the forward pass, which is small
-        # next to the VFI. `converged_age` is kept purely as a diagnostic, so
-        # an undersized maxAge is visible rather than silent.
+        # Record where the cross-section settles, but do NOT stop here.
+        # Breaking out corrupts the age profiles, the government budget, the
+        # PV sums and the statistics accumulator at once; see NOTES.md. Every
+        # kappa runs the full maxAge, and `converged_age` is kept only as a
+        # diagnostic so an undersized maxAge is visible.
         if age > 1
             drift = abs(Y[age] - Y[age-1]) + abs(C[age] - C[age-1])
             converged_age == 0 && drift <= p.tolDist && (converged_age = age)
@@ -1535,11 +1516,10 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
     welfare = finalize_welfare(
         welfare_value_function_by_kappa, welfare_simulation_by_kappa, p,
     )
-    # Every kappa now runs the full maxAge, so the PV tail opens at maxAge for
-    # all of them and `settledAge` is no longer a per-kappa quantity.
-    # `convergedAge` is diagnostic: 0 for a kappa means the cross-section had
-    # NOT settled by maxAge, in which case the closed-form tail rests on an
-    # assumption the path has not yet earned and maxAge should be raised.
+    # Every kappa runs the full maxAge, so the PV tail opens at maxAge for all
+    # of them. `convergedAge` is diagnostic: 0 means the cross-section had not
+    # settled by maxAge, so the closed-form tail is unearned and maxAge should
+    # be raised.
     # Report the ACHIEVED drift rather than a pass/fail on tolDist. Failing an
     # absolute 1e-10 test says little on its own: what the closed-form tail
     # needs is that (Y - C) has stopped moving, and a drift of 3e-10 and one of

@@ -58,26 +58,19 @@ const HD_SETTINGS = (;
     # alpha = 0.5 to set it independently.
     alpha = :paper,
 
-    # INFINITE HORIZON. No J: the agent's problem is stationary, so V and the
-    # policies carry no age index. What remains are solver controls.
+    # Infinite horizon: no J, so V and the policies carry no age index. What
+    # remains are solver controls.
     #
-    #   maxAge      cap on the FORWARD pass, which still runs age by age from
-    #               the birth condition because aggregates vary over the life
-    #               cycle and the government budget is a present value. The
-    #               pass stops early once the cross-section settles (tolDist)
-    #               and the discounted tail is then summed in closed form, so
-    #               maxAge is a safety net rather than the usual stopping rule.
+    #   maxAge      cap on the FORWARD pass, which still runs age by age
+    #               because the government budget is a present value. A safety
+    #               net: the pass stops once the cross-section settles.
     #   tolV        sup-norm tolerance on the value function.
     #   maxIterV    cap on maximizing sweeps.
-    #   howardSteps policy-evaluation sweeps between maximizations. 0 gives
-    #               plain VFI, which contracts at beta = 0.96 and so needs
-    #               ln(tol)/ln(beta) ~ 451 sweeps at tol = 1e-8 -- far more
-    #               than the 100 age sweeps of the J = 99 finite model. With
-    #               Howard the expensive maximizations number a few dozen.
-    #               Both settings must reach the same fixed point; disagreement
-    #               is a bug, and comparing them is the cheapest check there is.
-    #   tolDist     drift in (Y_j, C_j) below which the cross-section counts as
-    #               settled and the PV tail is closed analytically.
+    #   howardSteps policy-evaluation sweeps between maximizations; 0 gives
+    #               plain VFI. Both must reach the same fixed point, and
+    #               comparing them is the cheapest check available.
+    #   tolDist     drift in (Y_j, C_j) below which the cross-section counts
+    #               as settled and the PV tail is closed analytically.
     maxAge = 600,
 
     # Households are born at real age age0_real, which is model age 1: real age
@@ -175,31 +168,13 @@ const HD_SETTINGS = (;
     s_grid_method = :linear,
 
     # Asset-market access (psmodel.tex: s and h). pSS = Pr(stay saver),
-    # pHH = Pr(stay hand-to-mouth). The stationary HtM share is
-    #     piH = (1 - pSS) / (2 - pSS - pHH),
-    # printed in the options header, and the initial cross-section is drawn
-    # from it, so the HtM share is constant over the life cycle.
-    #
-    # CALIBRATED TO KAPLAN, VIOLANTE AND WEIDNER (2014), THEIR TABLE 4 -- the
-    # printed SCF 2007-2009 two-year transition matrix across poor-HtM,
-    # wealthy-HtM and non-HtM status. Collapsing P and W into H, weighting the
-    # two rows by their ergodic mass, gives a two-year chain pSS = 0.8160,
-    # pHH = 0.6029 whose stationary HtM share is 0.3166 against the 0.317 the
-    # paper reports. Annualizing preserves the stationary distribution and
-    # takes the square root of the second eigenvalue, 0.4189 -> 0.6472, which
-    # gives the two numbers below. See references/KVW2014_WealthyHandToMouth/.
-    #
-    # WHY NOT THE IID RESTRICTION. pHH = 1 - pSS was the earlier default and
-    # matched the one-third aggregate share, but it forces the second
-    # eigenvalue to zero: an expected HtM spell of 1.50 years against the 4.15
-    # implied here, and against the 3.5 (W-HtM) and 4.5 (P-HtM) the paper
-    # states directly. Persistence is a separate moment from the share, and
-    # Table 4 identifies it.
-    #
-    # The implied spells are 4.15 years in H and 8.95 years in S. Note the
-    # paper's age profile is NOT flat -- total HtM falls from about 50 percent
-    # at age 22 to about 20 percent in retirement (their Figure 6) -- while
-    # this chain is stationary by construction, so piH is a life-cycle average.
+    # pHH = Pr(stay hand-to-mouth), with stationary HtM share
+    #     piH = (1 - pSS) / (2 - pSS - pHH).
+    # The initial cross-section is drawn from it, so the share is constant over
+    # the life cycle. Calibrated to Kaplan, Violante and Weidner (2014), their
+    # Table 4, collapsed to two states and annualized; the iid restriction
+    # pHH = 1 - pSS matches the share but forces zero persistence. See
+    # NOTES.md and references/KVW2014_WealthyHandToMouth/.
     #
     #     pSS = 1.00,  pHH = 0.00   -> piH = 0       switches HtM off entirely
     #     pSS = 0.00,  pHH = 1.00   -> piH = 1       everyone hand-to-mouth

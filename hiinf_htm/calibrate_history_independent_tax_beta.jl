@@ -12,31 +12,6 @@
 # the prices fixed there is no qBorr left to move it.
 #
 # -----------------------------------------------------------------------------
-# WHY CALIBRATE BETA RATHER THAN A PRICE
-# -----------------------------------------------------------------------------
-# The one-price file solves the government-budget wedge by tying qSav = qBorr =
-# qGov = q and then calibrating q to the asset moment. That works, but it spends
-# the price on a wealth moment: the interest rate the model runs at is whatever
-# the asset target dictates, and cannot be set to the rate the exercise wants.
-# Here the assignment is reversed. The prices are inputs -- set them to 0.99,
-# or to the same value everywhere for an exact telescoping, or to a measured
-# spread -- and the asset moment is matched by the discount factor instead.
-#
-# The two files answer different questions. Use the one-price file when the
-# interest rate is free and the asset moment must hold; use this one when the
-# interest rate is part of the experiment and preferences absorb the residual.
-#
-# THE GOVERNMENT BUDGET IS NOT AUTOMATICALLY CLEAN HERE. The telescoping
-# argument in the one-price header is a statement about prices, not about beta:
-#
-#   PV(Y - C) = PV(T) - A_1 - sum_j qGov^(j-1) (qGov - q_j) A_(j+1),
-#
-# so PV(Y - C) = G is the government budget ONLY when q_j = qGov at every state.
-# Calibrating beta does nothing to that wedge. If the exercise needs the budget
-# to be exact, pass qSav = qBorr = qGov; the result print reports the residual
-# either way and says which case it is in.
-#
-# -----------------------------------------------------------------------------
 # IDENTIFICATION
 # -----------------------------------------------------------------------------
 # Two blocks, swept in this order:
@@ -81,46 +56,11 @@
 # flags it when it is short, so this is judged per run rather than guessed.
 #
 # -----------------------------------------------------------------------------
-# THE ACCESS CHAIN IS GIVEN, NOT CALIBRATED
-# -----------------------------------------------------------------------------
-# `pSS` and `pHH` are taken from SETTINGS (or from base_kwargs) and held fixed
-# through the search, exactly as the prices are. Two reasons, one of
-# identification and one of arithmetic.
-#
-# IDENTIFICATION. This is a two-instrument, two-target calibration: bbar against
-# the borrowing limit, beta against the asset ratio. The access chain adds a
-# third free parameter and no third moment, so it cannot be calibrated here
-# without a target. Under the SETTINGS default the chain is iid (pHH = 1 - pSS),
-# which collapses it to the single parameter piH = pHH, and that parameter is
-# set DIRECTLY to the data share rather than searched over -- it maps one for
-# one onto `shareHandToMouth`, so a search would only rediscover the number
-# already typed in. Separating pSS from pHH is a different exercise and needs a
-# panel moment on exit from hand-to-mouth status, which no statistic here
-# carries.
-#
-# ARITHMETIC. Hand-to-mouth households hold less, so the asset ratio falls in
-# piH at a given beta and the calibrated beta has to RISE to hit the same
-# target. The beta ceiling is therefore more likely to bind here than in
-# `hiinf`, and it is not a number that can simply be raised: it is pinned by the
-# relaxation-time rule below, so buying room means raising maxAge. A beta that
-# comes back sitting on beta_max at piH > 0 may mean the asset target is not
-# attainable with that many hand-to-mouth households at these prices -- which is
-# a statement about the model, not a failure of the search. Re-run at piH = 0 to
-# see whether the target was attainable without them.
-#
-# -----------------------------------------------------------------------------
-# WHAT CHANGES WHEN BETA MOVES, BEYOND THE ASSET DISTRIBUTION
-# -----------------------------------------------------------------------------
-# Flow utility is normalized in the solver as
-#
-#   V = (1 - beta) * (log c - phi h^(1+eta)/(1+eta)) + beta * E[V'],
-#
-# so V is a per-period equivalent and the welfare simulation weights ages by
-# (1 - beta) * beta^(age-1). Both the normalization and the age weights are
-# functions of beta. Welfare numbers from two calibrations with DIFFERENT
-# calibrated betas are therefore not the same functional evaluated at two
-# points, and differencing them is not a welfare comparison. Within one
-# calibrated beta -- comparing tax systems, say -- nothing changes.
+#   * The access chain is GIVEN, not calibrated: pSS and pHH are held fixed
+#     through the search, as the prices are. It would add a third free
+#     parameter and no third moment. Hand-to-mouth households hold less, so
+#     the calibrated beta has to rise to hit the same target and the ceiling
+#     binds sooner than in `hiinf`. See NOTES.md.
 #
 # -----------------------------------------------------------------------------
 # USAGE
@@ -146,6 +86,10 @@
 # Returns `(; beta, bbar, qSav, qBorr, qGov, eq, moments, residuals, converged,
 #            stalled, sweeps, nSolves, elapsedSeconds, calib, params)`.
 # Marek Kapicka, 2026
+#
+# Passages on the choice of instrument, the beta ceiling and the access
+# chain are in NOTES.md.
+#
 # =============================================================================
 
 # Reuses `solve_scalar`, `moments_from` and the solver entry points from the
