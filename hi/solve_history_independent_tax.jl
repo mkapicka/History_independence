@@ -1,3 +1,14 @@
+# =============================================================================
+# solve_history_independent_tax.jl
+#
+# Solver for the finite-horizon Bewley model with a history-independent HSV
+# tax. Backward induction gives the policies, a forward pass gives the
+# cross-section and its statistics, and a Brent solve sets the tax level lambda
+# so that the government budget clears.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 using LinearAlgebra
 using Printf
 using Statistics
@@ -48,22 +59,11 @@ when supplying a complete parameter set explicitly. Fields whose default is an
 expression are derived from the fields above them.
 """
 Base.@kwdef struct HIParams
-    # Size of the unanticipated one-time windfall used for the impact MPC, and
-    # the asset threshold below which a second, conditional MPC is reported.
-    # Both are in model asset units and both follow Discrete_HA's 2019
-    # numeraire (`+setup/Params.m`: `numeraire_in_dollars = 72000`,
-    # `shocks_dollars = [-1, -500, -5000, 1, 500, 5000]`,
-    # `dollar_thresholds = [1000, ...]`):
-    #
-    #     $500  / $72,000 = 0.0069444 of mean annual labor income
-    #     $1,000 / $72,000 = 0.0138889
-    #
-    # times this calibration's mean labor income of 0.9112. They are ABSOLUTE
-    # numbers, not fractions, because a fraction of mean income could only be
-    # resolved after the forward pass that needs it; the summary prints the
-    # realized ratios so drift away from $500 and $1,000 is visible rather than
-    # assumed. RECALIBRATE and these two move -- re-derive them from the new
-    # mean labor income rather than leaving them.
+    # Windfall for the impact MPC and the threshold for the low-asset MPC, in
+    # model asset units, on Discrete_HA's 2019 numeraire. Absolute rather than
+    # fractions of mean income, which is not known until the forward pass has
+    # run; the summary prints each against the realized mean. Re-derive both
+    # after a recalibration. See NOTES.md.
     mpc_shock::Float64
     mpc_lowasset_threshold::Float64
 
@@ -76,29 +76,18 @@ Base.@kwdef struct HIParams
     # Ages j = 0,...,J are stored in length-(J+1) vectors at index j+1.
     J::Int
 
-    # MODEL AGE is the 1-based array index, so model age 1 is j = 0, the first
-    # simulated period, at real age `age0_real`; real age = age0_real + j.
-    #
-    # Cross-sectional statistics are averaged over model ages stats_age_lo to
-    # stats_age_hi INCLUSIVE rather than over the whole life. The calibration
-    # target is Kaplan-Violante (2014) Table 2, built on a 2001 SCF
-    # cross-section of households aged 22-59, so with age0_real = 22 that
-    # window is model ages 1-38. `stats_age_hi = 0` in SETTINGS is resolved to
-    # J+1 by `hi_params`, which covers every age and is the pre-window
-    # behaviour; the equilibrium reports BOTH the window and the all-ages
-    # version, so the effect of restricting it is visible rather than implied.
+    # Model age is the 1-based array index: model age 1 is j = 0, at real age
+    # age0_real. Statistics are averaged over model ages stats_age_lo to
+    # stats_age_hi inclusive; `stats_age_hi = 0` is resolved to J+1 by
+    # `hi_params`. The equilibrium reports both the window and all ages.
     age0_real::Int
     stats_age_lo::Int
     stats_age_hi::Int
 
-    # Initial asset holdings at model age 1 (j = 0). a0 = 0.0 is the original
-    # condition -- everyone born with nothing -- and remains the default, so
-    # results are unchanged unless it is set. a0_scales_with_kappa multiplies
-    # a0 by exp(kappa), matching how wages and the borrowing limit
-    # (-bbar*exp(kappa + rho*z)) already scale with the permanent type: a flat
-    # a0 would otherwise leave the lowest-kappa household starting relatively
-    # far richer. a0 is placed on the grid by the same Young lottery used for
-    # a', not snapped to the nearest node, so it stays exact between points.
+    # Initial assets at model age 1. a0_scales_with_kappa multiplies a0 by
+    # exp(kappa), as wages and the borrowing limit already scale with the
+    # permanent type. Placed on the grid by the same Young lottery used for a',
+    # not snapped to the nearest node.
     a0::Float64
     a0_scales_with_kappa::Bool
 
@@ -289,16 +278,13 @@ Base.@kwdef mutable struct HIStatsAccumulator
     max_material_next_assets::Float64 = -Inf
     max_material_hours::Float64 = -Inf
     # Mass-weighted sum of the impact MPC, and the mass whose perturbed state
-    # a + mpc_shock left the top of the asset grid and was extrapolated. The
-    # second is a diagnostic: the extrapolation continues the last segment's
-    # slope, which is a guess, so a non-negligible share means aMax is too low
-    # for the windfall.
+    # left the top of the asset grid and was extrapolated. A non-negligible
+    # extrapolated share means aMax is too low for the windfall.
     sum_mpc::Float64 = 0.0
     mpc_extrapolated_mass::Float64 = 0.0
-    # The distribution of MPCs, not just its mean, following the measures
-    # Discrete_HA's MPCFinder reports beside `avg`: the mean over responders
-    # (`mpc_condl`), the responder shares (`mpc_pos`, `mpc_neg`, `mpc0`), and
-    # the MPC of the low-liquid-wealth group (`mpc_htm_a_lt_1000`).
+    # The distribution of MPCs, not just its mean: the mean over responders,
+    # the responder shares, and the MPC of the low-liquid-wealth group, as in
+    # Discrete_HA's MPCFinder.
     sum_mpc_positive::Float64 = 0.0
     mpc_positive_mass::Float64 = 0.0
     mpc_negative_mass::Float64 = 0.0
@@ -599,11 +585,9 @@ function print_aggregate_statistics(s, p::HIParams; label::AbstractString = "")
     @printf("share with zero assets                   = %.8f\n", s.shareZeroAssets)
     @printf("share at upper asset bound               = %.8f\n", s.shareAtAssetUpperBound)
     @printf("share at hours upper bound               = %.8f\n", s.shareAtHoursUpperBound)
-    # Kaplan-Violante (2022) eq. (2) averaged over the ages this block covers.
-    # The shock is printed beside it, absolutely and against this block's own
-    # mean labor income, because the MPC is only interpretable with the windfall
-    # size attached -- the consumption function is concave, so a larger windfall
-    # buys a smaller MPC.
+    # Kaplan-Violante (2022) eq. (2), averaged over the ages this block
+    # covers. The windfall is printed beside it: the consumption function is
+    # concave, so the MPC is only interpretable with the shock size attached.
     if hasproperty(s, :meanMPC)
         @printf("average impact MPC                       = %.8f\n", s.meanMPC)
         @printf("  windfall                               = %.8f  (%.6f of mean labor income)\n",
@@ -1120,76 +1104,43 @@ end
 # =============================================================================
 # THE IMPACT MPC
 # =============================================================================
-# Kaplan and Violante (2022, Annu. Rev. Econ.), their equation (2): for a
-# household whose state is (b, y) when an unanticipated one-time windfall of
-# size x arrives,
+# Kaplan and Violante (2022), their equation (2): for a household in state
+# (b, y) when an unanticipated windfall x arrives,
 #
 #     m_0(x; b, y) = [ c(b + x, y) - c(b, y) ] / x,
 #
-# and the average (their Online Appendix, equation D.7) integrates that function
-# under the distribution,
+# averaged under the distribution as in their equation (D.7). Here the windfall
+# lands on current assets and the average is taken with the forward-pass mass
+# over two age coverages: ages j = 0,...,J and the statistics window.
 #
-#     mbar_0(x) = int m_0(x; b, y) dmu(b, y).
+# The level is not comparable to theirs. KV report a quarterly MPC and this
+# model is annual, and hours are endogenous here, so c(a + x) is net of a labor
+# supply response. The formula is theirs; the consumption function is this
+# model's.
 #
-# Here the windfall lands on current assets, which is the model's cash-on-hand
-# margin: m_0 = [c(a + x, z, eps, j) - c(a, z, eps, j)] / x, averaged with the
-# forward-pass mass. Two coverages are reported, which is the one departure from
-# KV asked for: ages j = 0,...,J (`statisticsAllAges`) and the calibration
-# window stats_age_lo,...,stats_age_hi (`statistics`). KV have no age dimension
-# to choose between -- their baseline is infinite-horizon and mu is stationary.
-#
-# TWO THINGS THE LEVEL IS NOT COMPARABLE TO. First, KV report a QUARTERLY MPC
-# out of $500; this model is annual, so this is an annual MPC out of an annual
-# windfall and will be larger for the same household. Second, hours are
-# endogenous here and exogenous in KV's baseline, so c(a + x) embeds a labor
-# supply response: the windfall relaxes the budget, hours fall, and the
-# consumption response is net of that. The FORMULA is theirs exactly; the
-# consumption function it is applied to is this model's.
-#
-# c(a + x) is read off the consumption policy by linear interpolation in a,
-# which is what the Kaplan-lineage codes do (`coninterp_mpc` in Discrete_HA).
-#
-# ACCURACY, MEASURED. At the terminal age a' = 0 binds, so the problem is static
-# and c(a) has a closed form: h solves A(1-tau) = c phi h^(eta+tau) with
-# A = lambda*tax_base. Against the EXACT ARC [c(a+x) - c(a)]/x built from that
-# root, the reported MPC converges in the asset grid at better than first order
-# (:interpolate, J=39, nZ=nEps=5, nKappa=3): worst cell 2.04e-2, 9.02e-3,
-# 3.78e-3, 1.46e-3 at nA = 51, 101, 201, 401, mean error 4.55e-3 to 3.03e-4.
-# Benchmark it against the DERIVATIVE instead and a 2.2% floor appears that no
-# refinement removes -- that gap is real convexity of c over the windfall, not
-# error, since dc/da = (eta+tau)/(phi h^(1+eta) + eta+tau) RISES with a as hours
-# fall. KV's object is the arc, which is why they report MPCs per shock size.
-#
-# GRID RESOLUTION MATTERS MORE THAN THE METHOD, but both converge. The average
-# MPC under :grid_search exceeds :interpolate by 5.41% at nA = 101 and 1.91% at
-# nA = 201, then agrees to -0.48% at nA = 401 (0.28542 against 0.28681): a'(a)
-# is a step function under grid search and c inherits a sawtooth, which biases
-# the MPC UP at coarse grids rather than permanently. At the production nA = 151
-# expect :grid_search to overstate by roughly 3%; raise nA or switch to
-# :interpolate when the MPC is the object of interest. The summary reports which
-# method produced the number.
+# c(a + x) is read off the consumption policy by linear interpolation in a, as
+# `coninterp_mpc` does in Discrete_HA. The reported MPC is an ARC, not a
+# derivative, so it converges in the asset grid rather than in the windfall.
+# :grid_search biases it up at coarse grids, by roughly 3% at the production
+# nA = 151; raise nA or switch to :interpolate when the MPC is the object of
+# interest. See NOTES.md for the measured convergence.
 @inline function interpolate_consumption(con::AbstractVector{Float64},
                                         a_target::Float64, p::HIParams)
     grid = p.a_grid
     nA = length(grid)
-    # OFF-GRID, FOLLOWING `extend_interp` IN Discrete_HA's solve_EGP.m.
-    # Above the top node MATLAB's `griddedInterpolant(..., 'linear')` continues
-    # the last segment's slope, so that is what happens here: CLAMPING instead
-    # would report slope 0 and drive the MPC of those cells to zero, which is
-    # the wrong sign of error for a household rich enough to leave the grid.
-    # The flag is still returned, because extrapolating is a statement about
-    # aMax being too low for the windfall, not a result.
+    # Off-grid handling follows `extend_interp` in Discrete_HA's solve_EGP.m:
+    # continue the last segment's slope above the top node rather than clamp,
+    # which would report slope 0. The flag is still returned as a diagnostic.
     if a_target >= grid[nA]
         slope = (con[nA] - con[nA-1]) / (grid[nA] - grid[nA-1])
         return con[nA] + slope * (a_target - grid[nA]), true
     elseif a_target <= grid[1]
         # Their rule below the grid: consume the whole shortfall, slope 1.
-        # Unreachable for a positive windfall, since a_grid[1] is the borrowing
-        # limit; kept so a negative `mpc_shock` behaves as it does in their code.
+        # Unreachable for a positive windfall, but kept so a negative
+        # `mpc_shock` behaves as it does in their code.
         return con[1] + (a_target - grid[1]), false
     end
-    # The grid is sorted, so one searchsorted is enough; `i` is the first index
-    # at or above the target, so the bracket is (i-1, i) with i >= 2.
+    # The grid is sorted, so one searchsorted gives the bracket (i-1, i).
     i = searchsortedfirst(grid, a_target)
     i <= 1 && return con[1], false
     lo, hi = grid[i-1], grid[i]
@@ -1197,10 +1148,9 @@ end
     return (1.0 - w) * con[i-1] + w * con[i], false
 end
 
-# Consumption on the whole asset grid at one age, which is what the MPC needs:
-# the perturbed state a + x sits at a different asset index, so the policy must
-# be available away from the cell being visited. Filled once per age into a
-# reused buffer rather than carried for every age at once.
+# Consumption over the whole asset grid at one age: the perturbed state a + x
+# sits at a different asset index, so the policy must be available away from the
+# cell being visited. Filled once per age into a reused buffer.
 function fill_consumption_policy!(con::Array{Float64,3}, age::Int,
                                   policyAIndex, policyA, policyH,
                                   q_by_ap::Vector{Float64},
@@ -1307,10 +1257,8 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                 effective_borrowing_limit = binding_age ? -lower_ap : 0.0
                 welfare_simulation += utility_weight * mass * u
 
-                # The impact MPC at this cell. c(a) is recomputed from the
-                # policy buffer rather than reusing `c` above so that both legs
-                # of the difference come from the SAME interpolant: mixing the
-                # exact c(a) with an interpolated c(a + x) would put the
+                # Both legs come from the same interpolant: mixing the exact
+                # c(a) with an interpolated c(a + x) would put the
                 # interpolation error straight into the numerator.
                 c_here, _ = interpolate_consumption(view(con_age, :, iz, ie),
                                                     a, p)
@@ -1324,13 +1272,9 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                 Y[age] += weighted_mass * y
                 A[age] += weighted_mass * ap
 
-                # Three age coverages from one body: `stats` is the
-                # calibration window, `stats_all` every age, and `stats_lo` the
-                # single age at which the window opens -- the cross-section AS
-                # IT ENTERS the window, which the window itself cannot show.
-                # Each keeps its own total_mass, the denominator every share
-                # and mean divides by, which is why the gate wraps the whole
-                # call rather than parts of it.
+                # Three age coverages from one body: the calibration window,
+                # every age, and the single entry age. Each keeps its own
+                # total_mass, so the gate wraps the whole call.
                 accumulate_stats!(stats_all, weighted_mass, ia, a, ap, h, c, y,
                                   true_borrowing_limit, effective_borrowing_limit,
                                   at_borrowing_constraint, at_asset_upper,
@@ -1461,11 +1405,9 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
 
     stats = finalize_statistics(stats_acc, p)
     stats_all = finalize_statistics(stats_all_acc, p)
-    # The entry-age cross-section, reduced with the same machinery so it cannot
-    # drift from the windowed one. Only the two asset RATIOS are carried over,
-    # and both divide by the WINDOW's mean labor income -- the same denominator
-    # `medianAssetsToMeanLaborIncome` uses, so they are comparable to the
-    # calibration targets rather than to a one-age income no target is built on.
+    # The entry-age cross-section, reduced with the same machinery. Only the
+    # two asset ratios are carried over, both divided by the WINDOW's mean
+    # labor income so they are comparable to the calibration targets.
     stats_lo = finalize_statistics(stats_lo_acc, p)
     stats = merge(stats, (;
         meanAssetsAtStatsAgeLoToMeanLaborIncome =

@@ -1,62 +1,34 @@
 # =============================================================================
 # sweep_mu2.jl
 #
-# Sweep the second history-dependence root mu2 over a grid, holding mu1 = 0,
-# and collect for each grid point
-#
-#   eq.welfare.overallValueFunction   (ex-ante welfare, kappa-averaged)
-#   eq.statistics.meanAssets
-#   eq.statistics.medianAssets
-#
-# in vectors indexed by the grid point. The default grid is 10 points on
-# [0, 0.98]; mu1 = 0 throughout, so alpha loads the mu1 block onto a stock
-# that is identically zero and theta0 falls with mu2 through
-#
-#   theta0 = 1 / ( alpha/(1 - beta*mu1) + (1-alpha)/(1 - beta*mu2) ),
-#
-# from theta0 = 1 at mu2 = 0 down to theta0 = 0.1118 at mu2 = 0.98 (alpha = 0.5,
-# beta = 0.96). The first grid point mu2 = 0 is the history-independent limit
-# and reproduces the hi solver, so it doubles as a consistency check.
+# Sweeps the second history-dependence root mu2 over a grid, holding mu1 = 0,
+# and returns welfare, asset and price series indexed by the grid point. The
+# default grid is 10 points on [0, 0.98]. The first point, mu2 = 0, is the
+# history-independent limit and reproduces the hi solver, so it doubles as a
+# consistency check.
 #
 # -----------------------------------------------------------------------------
-# Cost and accuracy notes
+# WHAT TO WATCH
 # -----------------------------------------------------------------------------
-# * COST. With mu1 = 0 the s1-grid collapses to a single point (build_s_grid
-#   returns [0.0] whenever mu == 0, regardless of nS1), so the state space is
-#   nS1 = 1 rather than 7 and each solve is roughly a seventh of the cost of
-#   the two-stock baseline. Still budget tens of minutes for the full sweep at
-#   nA = 101, nS2 = 7, labor_grid_size = 101, and run with `julia -t auto`.
+# * With mu1 = 0 the s1-grid collapses to a single point, so each solve is much
+#   cheaper than the two-stock baseline. Budget tens of minutes for the full
+#   sweep at production grids and run with `julia -t auto`.
 #
-# * S-GRID RESOLUTION DEGRADES IN mu2. The s2-grid spans
-#   [mu2*m_lo/(1-mu2), mu2*m_hi/(1-mu2)], so its width grows like mu2/(1-mu2):
-#   a factor 0.43 at mu2 = 0.3 but 49 at mu2 = 0.98. At fixed nS2 = 7 the
-#   spacing at the top of the grid is therefore about 114 times coarser than at
-#   mu2 = 0.3. Treat the high-mu2 end as indicative, not converged, and re-run
-#   the last few points with a larger nS2 before reading anything off them.
-#   The reported sClampedMassShare is the diagnostic for the grid *bounds*, not
-#   for this spacing problem — it can be negligible while the interpolation
-#   error is not.
+# * The s2-grid width grows like mu2/(1-mu2), so at fixed nS2 the top of the
+#   grid is badly under-resolved. Treat the high-mu2 end as indicative and
+#   re-run those points with a larger nS2. sClampedMassShare diagnoses the grid
+#   BOUNDS, not this spacing problem. See NOTES.md.
 #
-# * THE LAMBDA BRACKET MUST WIDEN WITH mu2. The budget-clearing lambda falls
-#   steeply in mu2 — theta0 falls, so the income scale lambda*exp(pow*m)*h^pow
-#   needs a much smaller level factor to balance the budget — and it leaves the
-#   HD_SETTINGS bracket [0.20, 2.50] well before the top of the grid. At
-#   mu2 = 0.98 the root is around 0.007, two orders of magnitude below
-#   lambdaMin. This sweep therefore overrides lambdaMin to LAMBDA_MIN_SWEEP =
-#   1e-3 by default; pass lambdaMin = ... to change it. This matters because
-#   the solver does NOT throw when the bracket fails: it returns the best
-#   evaluated equilibrium, which sits at the bracket endpoint with a large
-#   budget residual and asset statistics that are pure artifact (at mu2 = 0.98
-#   with the stock bracket, lambda pins at 0.200000 with residual -0.6 and a
-#   median-assets figure an order of magnitude off).
+# * The budget-clearing lambda falls steeply in mu2 and leaves the HD_SETTINGS
+#   bracket well before the top of the grid, so the sweep overrides lambdaMin
+#   to LAMBDA_MIN_SWEEP. The solver does not throw when the bracket fails: it
+#   returns the best evaluated equilibrium, whose statistics are artifact.
 #
-# * CONVERGENCE IS CHECKED, NOT ASSUMED. Because of the above, every point is
-#   flagged `converged[i] = abs(govBudgetResidual[i]) <= tolGovBudget`. Read
-#   only the converged points; the summary marks the others and warns.
+# * Every point is flagged converged[i] = abs(residual) <= tolGovBudget. Read
+#   only the converged points. A point that throws records NaN and its message
+#   in `errors`, and the sweep continues.
 #
-# * FAILURES ARE RECORDED, NOT FATAL. Each point runs inside a try/catch; a
-#   point that throws records NaN in every output vector and its message in
-#   `errors`, and the sweep continues.
+# Marek Kapicka, 2026
 #
 # Usage:
 #   include("sweep_mu2.jl")
@@ -75,15 +47,13 @@
 using JLD2
 using Printf
 
-include("run_history_dependent_tax.jl")   # defines run_history_dependent_tax
-                                          # and loads the solver + HD_SETTINGS
+include("run_history_dependent_tax.jl")   # also loads the solver + HD_SETTINGS
 
 """
     MU2_MIN, MU2_MAX, N_MU2
 
-Defaults for the mu2 grid: `N_MU2 = 10` points on `[MU2_MIN, MU2_MAX] =
-[0, 0.98]`. Override any of the three at the call site, e.g.
-`sweep_mu2(mu2_min = 0.2, mu2_max = 0.9, n_mu2 = 20)`.
+Defaults for the mu2 grid: 10 points on [0, 0.98]. Override any of the three
+at the call site.
 """
 const MU2_MIN = 0.0
 const MU2_MAX = 0.98
@@ -92,10 +62,8 @@ const N_MU2   = 10
 """
     build_mu2_grid(; mu2_min = MU2_MIN, mu2_max = MU2_MAX, n_mu2 = N_MU2)
 
-Equally spaced mu2 grid on `[mu2_min, mu2_max]` with `n_mu2` points. Both ends
-must lie in [0, 1), the interval must be non-empty, and `n_mu2 = 1` returns the
-single point `mu2_min` (`range` with `length = 1` requires equal endpoints, so
-that case is handled separately).
+Equally spaced mu2 grid with `n_mu2` points. Both ends must lie in [0, 1) and
+`n_mu2 = 1` returns the single point `mu2_min`.
 """
 function build_mu2_grid(; mu2_min = MU2_MIN, mu2_max = MU2_MAX, n_mu2 = N_MU2)
     lo, hi, n = Float64(mu2_min), Float64(mu2_max), Int(n_mu2)
@@ -215,8 +183,8 @@ function sweep_mu2(mu2_grid = nothing;
     for i in 1:n
         t0 = time()
         try
-            # The solve prints its own options block and summary; suppress that
-            # unless the caller asked for it, so the sweep's table stays legible.
+            # Suppress the per-solve output unless asked, so the sweep table
+            # stays legible.
             result = if full_output
                 run_history_dependent_tax(; mu1 = mu1, mu2 = mu2vec[i],
                                           nS1 = nS1, nS2 = nS2,
@@ -405,18 +373,13 @@ function merge_mu2_sweeps(dir = joinpath(@__DIR__, "results");
             nFiles = length(files), files = files[order])
 end
 
-# Script entry point. `julia -t auto sweep_mu2.jl` runs the defaults;
-# `julia -t auto sweep_mu2.jl <mu2_min> <mu2_max> <n_mu2> <nS1> <nS2>` sets
-# them, and a leading subset works too (one argument sets mu2_min only, and so
-# on). From the REPL, include this file and call `sweep = sweep_mu2()`.
+# -----------------------------------------------------------------------------
+# SCRIPT ENTRY POINT
+# -----------------------------------------------------------------------------
 if abspath(PROGRAM_FILE) == abspath(@__FILE__)
-    # Two argument styles, chosen by whether any token contains '='.
-    #
-    #   key=value  any keyword sweep_mu2 accepts, same as the REPL call:
-    #                julia sweep_mu2.jl mu2_min=0.96 n_mu2=4 alpha=0.5 nS2=101
-    #   positional mu2_min mu2_max n_mu2 nS1 nS2, a leading subset allowed:
-    #                julia sweep_mu2.jl 0.98 0.98 1 7 21
-    #
+    # Two argument styles, chosen by whether any token contains '=':
+    #   key=value  any keyword sweep_mu2 accepts, as in the REPL call
+    #   positional mu2_min mu2_max n_mu2 nS1 nS2, a leading subset allowed
     # The positional form is kept because existing batch scripts use it.
     sweep = if any(contains('='), ARGS)
         sweep_mu2(; parse_cli_kwargs(ARGS)...)
