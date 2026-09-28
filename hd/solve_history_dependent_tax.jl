@@ -1,7 +1,9 @@
 # =============================================================================
 # solve_history_dependent_tax.jl  --  STANDALONE
 #
-# Finite-horizon Bewley economy with a HISTORY-DEPENDENT tax system
+# Marek Kapicka, 2026
+#
+# Finite-horizon Bewley economy with a history-dependent tax system
 # (Section 1 of Bewley.tex). Budget constraint:
 #
 #   c + q(a') a' <= lambda * exp( pow * (z + eps + kappa
@@ -12,24 +14,20 @@
 #   s1' = mu1 * (z + eps + kappa + ln h + s1),
 #   s2' = mu2 * (z + eps + kappa + ln h + s2),
 #
-# with theta0 implied by the FINITE-horizon promise-keeping restriction
+# with theta0 implied by the finite-horizon promise-keeping restriction
 #   sum_{s=0}^{J} beta^s theta_s = 1,  theta_s = theta0*(alpha*mu1^s + (1-alpha)*mu2^s),
-# which is what build_theta imposes in the no-savings code. The mixture weight
-# alpha is a free setting: a number, or :paper for the paper convention
-#   alpha = (rho - mu1) / (mu2 - mu1),   alpha = 1 when mu1 = mu2.
-# theta0 is derived and cannot be set. alpha lies in [0, 1] iff mu1 <= rho <=
-# mu2; outside that the mixture is signed, which warns but is not rejected.
+# as build_theta imposes in the no-savings code. alpha is a free setting: a
+# number, or :paper for (rho - mu1)/(mu2 - mu1). theta0 is derived and cannot
+# be set. alpha lies in [0, 1] iff mu1 <= rho <= mu2; outside that the mixture
+# is signed, which warns but is not rejected.
 #
-# mu1 = mu2 = 0 implies alpha = 1, theta0 = 1 and s1 = s2 = 0, reproducing the
-# history-independent model of Section 1.1 exactly (use nS1 = nS2 = 1).
+# mu1 = mu2 = 0 gives alpha = 1, theta0 = 1 and s1 = s2 = 0, reproducing the
+# history-independent model exactly (use nS1 = nS2 = 1).
 #
 # -----------------------------------------------------------------------------
-# This file is SELF-CONTAINED: it does not include or call the
-# history-independent code. All shared infrastructure (shock discretization,
-# asset/labor grids, statistics, the lambda solver) is replicated here inside
-# the module `HistoryDependentTax`, so the two codebases can evolve
-# independently and be loaded in the same session without name collisions.
-# Only the HD-specific API is exported:
+# Self-contained: it does not include or call the history-independent code. All
+# shared infrastructure is replicated inside the module `HistoryDependentTax`,
+# so the two codebases can be loaded in the same session. Exported API:
 #
 #   HDParams, HD_SETTINGS, make_history_dependent_params,
 #   solve_history_dependent_tax, print_hd_equilibrium_summary,
@@ -41,13 +39,12 @@
 #   p  = make_history_dependent_params()        # HD_SETTINGS + overrides
 #   eq = solve_history_dependent_tax(p)
 #
-# Solution method: hours affect s' and are therefore intertemporal, so (a', h)
-# are chosen JOINTLY on grids against a continuation value BILINEARLY
-# interpolated in (s1', s2'); the distribution uses the matching bilinear
-# Young (1990) lottery; infeasible states carry the finite sentinel
-# VINFEASIBLE (not -Inf, which would create 0 * Inf = NaN in the
-# interpolation); s' outside the grid is clamped and the clamped mass share is
-# reported in eq.sClampedMassShare with a warning when material.
+# Solution method: hours move s' and are therefore intertemporal, so (a', h)
+# are chosen jointly on grids against a continuation value bilinearly
+# interpolated in (s1', s2'), with the matching bilinear Young (1990) lottery
+# for the distribution. Infeasible states carry the finite sentinel
+# VINFEASIBLE, since -Inf would give 0 * Inf = NaN in the interpolation. s'
+# outside the grid is clamped and the clamped share is reported.
 # =============================================================================
 
 module HistoryDependentTax
@@ -97,21 +94,17 @@ struct HDParams
     # horizon and shocks
     J::Int
 
-    # MODEL AGE is the 1-based array index: model age 1 is j = 0, at real age
-    # `age0_real`. Cross-sectional statistics are averaged over model ages
-    # stats_age_lo to stats_age_hi INCLUSIVE; `stats_age_hi = 0` in HD_SETTINGS
-    # resolves to J+1, which covers every age and is the behaviour from before
-    # the window existed. The equilibrium reports BOTH the window and the
-    # all-ages version. Mirrors `hdinf` and `hi`.
+    # Model age is the 1-based array index: model age 1 is j = 0, at real age
+    # age0_real. Statistics are averaged over model ages stats_age_lo to
+    # stats_age_hi inclusive; `stats_age_hi = 0` resolves to J+1. The
+    # equilibrium reports both the window and all ages, as `hi` does.
     age0_real::Int
     stats_age_lo::Int
     stats_age_hi::Int
 
-    # Initial asset holdings at model age 1. a0 = 0.0 is the original "born
-    # with nothing" condition and remains the default. a0_scales_with_kappa
-    # multiplies it by exp(kappa), matching how wages and the borrowing limit
-    # already scale with the permanent type. a0 is placed by the same Young
-    # lottery used for a', not snapped to the nearest node.
+    # Initial assets at model age 1. a0_scales_with_kappa multiplies it by
+    # exp(kappa), as wages and the borrowing limit already scale with the
+    # permanent type. Placed by the same Young lottery used for a'.
     a0::Float64
     a0_scales_with_kappa::Bool
     z_grid::Vector{Float64}
@@ -175,11 +168,9 @@ struct HDParams
 end
 
 function HDParams(;
-    # Model and solver parameters carry NO defaults here: `HD_SETTINGS` in
-    # model_settings.jl is the single source of truth, applied through
-    # `make_history_dependent_params`. A direct `HDParams()` call missing a
-    # keyword fails fast with an UndefKeywordError instead of silently
-    # solving a different model.
+    # No defaults here: HD_SETTINGS is the single source of truth, applied
+    # through make_history_dependent_params. A direct HDParams() call missing a
+    # keyword raises UndefKeywordError rather than solving a different model.
     beta,
     eta,
     phi,
@@ -274,26 +265,14 @@ function HDParams(;
         error("asset_grid_zero_share must be in [0, 1)")
     asset_grid_zero_width >= 0.0 || error("asset_grid_zero_width must be nonnegative")
 
-    # The mixture weight in theta_k = theta0*(alpha*mu1^k + (1-alpha)*mu2^k) is
-    # a FREE setting. Two forms are accepted:
+    # The mixture weight is a free setting: a number, used as given, or
+    # :paper for (rho - mu1)/(mu2 - mu1), which is what build_theta uses in the
+    # no-savings code and stays consistent when the roots move. Equal roots are
+    # the one-root case, where alpha is irrelevant and set to 1.
     #
-    #   alpha = <number>   used as given, whatever the roots are;
-    #   alpha = :paper     the paper convention (rho - mu1)/(mu2 - mu1), which
-    #                      is what makes the kernel reproduce the optimal policy
-    #                      at persistence rho, and what build_theta uses in the
-    #                      no-savings code (../../finite_horizon.jl). Equal roots
-    #                      are the one-root case, where the kernel collapses to
-    #                      theta0*mu^k and alpha is irrelevant, so it is 1.
-    #
-    # Use :paper when the roots are meant to be the optimal ones and should stay
-    # consistent if you move them; use a number when alpha is an object of study
-    # in its own right. A hard-coded number goes stale the moment the roots
-    # change, which is the trap :paper exists to avoid.
-    #
-    # alpha lies in [0, 1] iff the roots bracket rho, mu1 <= rho <= mu2. Outside
-    # that range the mixture is signed and the two blocks pull against each
-    # other; that is unusual but not invalid, so it warns rather than errors.
-    # The denom and pow checks below still catch the degenerate cases.
+    # alpha lies in [0, 1] iff the roots bracket rho. Outside that range the
+    # mixture is signed, which warns rather than errors; the denom and pow
+    # checks below catch the degenerate cases.
     alpha = if alpha === :paper
         isapprox(mu1, mu2) ? 1.0 : (rho - mu1) / (mu2 - mu1)
     elseif alpha isa Real
@@ -305,25 +284,16 @@ function HDParams(;
         @warn "alpha is outside [0, 1]: the two root blocks carry opposite signs" alpha rho mu1 mu2
     end
 
-    # Promise-keeping restriction pins down theta0. The normalization is the
-    # FINITE-horizon one,
+    # Promise keeping pins down theta0 through the FINITE-horizon
+    # normalization,
     #
     #   sum_{s=0}^{J} beta^s theta_s = 1,   theta_s = theta0*M_s,
     #   M_s = alpha*mu1^s + (1-alpha)*mu2^s,
     #
-    # written as the explicit sum so it matches build_theta in the no-savings
-    # code (../../finite_horizon.jl) term for term. Closed form, for reference:
-    #   sum = alpha*(1-(beta*mu1)^(J+1))/(1-beta*mu1)
-    #       + (1-alpha)*(1-(beta*mu2)^(J+1))/(1-beta*mu2).
-    #
-    # The infinite-horizon version (dropping the (beta*mu)^(J+1) terms) is what
-    # this file used previously; it overstates the sum and so understates
-    # theta0, by 10% at J = 39 with mu2 near one. The finite sum is the right
-    # one here because s1 and s2 start at 0 at age 0, so the kernel a household
-    # actually faces reaches back at most j periods and is truncated anyway.
-    #
-    # mu = 0 contributes M_0 = 0^0 = 1 and M_s = 0 for s >= 1, so the mu1 =
-    # mu2 = 0 limit still gives theta0 = 1 exactly.
+    # written as an explicit sum so it matches build_theta in the no-savings
+    # code term for term. The infinite-horizon version understates theta0; see
+    # NOTES.md. mu = 0 contributes M_0 = 1 and M_s = 0 for s >= 1, so the
+    # mu1 = mu2 = 0 limit still gives theta0 = 1 exactly.
     M = [alpha * mu1^s + (1.0 - alpha) * mu2^s for s in 0:J]
     denom = sum(beta^s * M[s+1] for s in 0:J)
     denom > 0.0 || error("invalid (alpha, mu1, mu2): theta0 denominator <= 0")
@@ -569,21 +539,12 @@ function build_s_grid(mu::Real, nS::Int, J::Int, kappa_grid, z_grid, eps_grid,
         error("build_s_grid with method = :quantile needs moment_args")
     means, vars = s_stock_moments(mu, J; moment_args...)
 
-    # Age-pooled CDF, equal weight per age, over ages 1..J ONLY.
-    #
-    # Age 0 is deliberately excluded. It would enter as a point mass at s = 0
-    # (s_0 = 0 for everyone), i.e. a JUMP in F of height (1-w)/(J+1) -- 0.0175 at
-    # J = 39, w = 0.30. Quantile levels are spaced 1/n apart, so as soon as
-    # n > (J+1)/(1-w) ~ 57 two or more levels land inside that jump and every one
-    # of them inverts to exactly s = 0. The duplicated node then failed the
-    # strict-monotonicity check and the whole quantile grid was discarded, which
-    # is the "not strictly increasing" fallback this branch used to hit at
-    # nS2 >= 101 -- precisely the grid sizes the method exists to serve.
-    #
-    # Excluding it costs nothing: the initial condition is represented on the
-    # grid by the explicit snap-to-zero node below, so keeping the atom here
-    # double-counted it. With ages 1..J the mixture is continuous and strictly
-    # increasing on the support, so distinct levels give distinct nodes at any n.
+    # Age-pooled CDF, equal weight per age, over ages 1..J only. Age 0 is
+    # excluded: it would enter as a point mass at s = 0, and at large nS two or
+    # more quantile levels land inside that jump, duplicate the node and fail
+    # the strict-monotonicity check. Excluding it costs nothing, since the
+    # snap-to-zero node below already represents the initial condition. See
+    # NOTES.md.
     function F_stock(x::Float64)
         acc = 0.0
         for j in 1:J
@@ -594,15 +555,11 @@ function build_s_grid(mu::Real, nS::Int, J::Int, kappa_grid, z_grid, eps_grid,
         return acc / J
     end
 
-    # DEFENSIVE MIXING with a uniform, exactly as in importance sampling. Pure
-    # quantile spacing packs points so tightly around the mean that the outermost
-    # cells become enormous -- at nS = 11 the bottom cell ran from -174 to -15 --
-    # and the Young lottery then puts a share of any mass falling in that cell
-    # onto the extreme node, from which s' leaves the grid and is clamped.
-    # Measured: pure quantile spacing left 5.3e-3 clamped mass and was WORSE than
-    # :linear at nS <= 15. Blending caps the widest cell at about
-    # (s_hi - s_lo)/(S_GRID_UNIFORM_BLEND*nS) while keeping most of the
-    # concentration. See the tuning table at S_GRID_UNIFORM_BLEND.
+    # Blended with a uniform, as in importance sampling. Pure quantile spacing
+    # packs points so tightly around the mean that the outermost cells become
+    # enormous and mass placed on the extreme node leaves the grid. Blending
+    # caps the widest cell while keeping most of the concentration. See
+    # NOTES.md and the tuning table at S_GRID_UNIFORM_BLEND.
     w = S_GRID_UNIFORM_BLEND
     F(x::Float64) = (1.0 - w) * F_stock(x) +
                     w * clamp((x - s_lo) / (s_hi - s_lo), 0.0, 1.0)
@@ -627,12 +584,9 @@ function build_s_grid(mu::Real, nS::Int, J::Int, kappa_grid, z_grid, eps_grid,
         grid[i] = 0.5 * (lo + hi)
     end
 
-    # LOCAL REPAIR of coincident nodes. With the age-0 atom gone the inversion is
-    # injective in exact arithmetic, but a steep enough F can still return two
-    # nodes within rounding of each other. Repair that locally -- drop the
-    # duplicates and refill by bisecting the widest gaps -- rather than throwing
-    # the whole quantile grid away, which silently cost the accuracy the method
-    # exists to provide.
+    # Local repair of coincident nodes: a steep enough F can return two nodes
+    # within rounding of each other. Drop the duplicates and refill by
+    # bisecting the widest gaps, rather than discarding the quantile grid.
     tol = 1e-10 * (s_hi - s_lo)
     sort!(grid)
     kept = Float64[grid[1]]
@@ -743,16 +697,10 @@ function finalize_statistics(stats::StatsAccumulator, p::HDParams)
     # Mid-cumulative interpolation rather than StatsBase's weighted-quantile
     # convention, which is biased low on a coarse nonuniform grid holding a
     # discretized continuous distribution. See `interpolated_weighted_quantile`
-    # in common/grids.jl for the measured comparison against a known median:
-    # at nA = 151 StatsBase errs by 5.8% of the median and refinement does not
-    # close the gap. Measured on this solver's own distribution at J = 39,
-    # nA = 101, the two conventions differ by 4.6%, against a calibration
-    # target of 0.0498. The infinite-horizon solvers have used this since they
-    # were written; this brings the finite pair into line.
+    # in common/grids.jl, and NOTES.md for the measured comparison.
     median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_mass, 0.5)
     # Both limits exist only at ages j = 0,...,J-1, so they are averaged over
-    # the mass of those ages rather than over the whole population (matching
-    # the history-independent solver).
+    # the mass of those ages rather than over the whole population.
     mean_borrowing_limit = safe_ratio(stats.sum_borrowing_limit,
                                       stats.borrowing_limit_mass)
     mean_effective_borrowing_limit = safe_ratio(stats.sum_effective_borrowing_limit,
@@ -879,11 +827,10 @@ end
 # Backward induction for one kappa: joint (a', h) grid choice with bilinear
 # interpolation of the continuation value in (s1', s2')
 #
-# Parallelism lives HERE, over the nEps*nS1*nS2 blocks of (eps, s1, s2) at each
-# (age, z), not over kappa: nKappa is typically 3, which caps a kappa-threaded
-# solver at 3 cores. Blocks write disjoint slices of Vcur/policyAIndex/policyH
-# and only read the shared EVz, so the result is independent of the schedule
-# and bit-for-bit identical to a serial run.
+# Parallelism lives here, over the nEps*nS1*nS2 blocks of (eps, s1, s2) at
+# each (age, z), not over kappa, which is typically 3 and would cap the solver
+# at 3 cores. Blocks write disjoint slices and only read the shared EVz, so the
+# result is bit-for-bit identical to a serial run.
 # -----------------------------------------------------------------------------
 
 # Per-thread scratch. EVh starts zeroed because the terminal age is solved
@@ -1052,10 +999,9 @@ function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
         cash[iap, ia] = p.a_grid[ia] - q_by_ap[iap] * p.a_grid[iap]
     end
 
-    # One scratch set per thread; blocks are handed out with :static
-    # scheduling, so threadid() is stable for the duration of each loop.
-    # Size by maxthreadid(), not nthreads(): the interactive threadpool
-    # carries ids above the default pool's count.
+    # One scratch set per thread; :static scheduling keeps threadid() stable
+    # for the duration of each loop. Sized by maxthreadid(), not nthreads():
+    # the interactive threadpool carries ids above the default pool's count.
     scratch = [BlockScratch(nH, nA) for _ in 1:Threads.maxthreadid()]
     blocks = [(ie, is1, is2) for is2 in 1:nS2 for is1 in 1:nS1 for ie in 1:nE]
     nBlocks = length(blocks)
