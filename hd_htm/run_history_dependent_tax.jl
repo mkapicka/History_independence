@@ -49,11 +49,14 @@ Reload with `load_hd_result(path)` (after including this file, so the
 function save_hd_result(result; dir = joinpath(@__DIR__, "results"))
     mkpath(dir)
     p = result.params
+    # pSS/pHH are in the name: two runs differing only in the access chain are
+    # different models and must not overwrite each other.
     name = @sprintf(
-        "result_mu1=%.3f_mu2=%.3f_J=%d_nA=%d_nS1=%d_nS2=%d_nZ=%d_nEps=%d_nKappa=%d.jld2",
+        "result_hd_htm_mu1=%.3f_mu2=%.3f_J=%d_nA=%d_nS1=%d_nS2=%d_nZ=%d_nEps=%d_nKappa=%d_pSS=%.4f_pHH=%.4f.jld2",
         p.mu1, p.mu2, p.J, length(p.a_grid),
         length(p.s1_grid), length(p.s2_grid),
-        length(p.z_grid), length(p.eps_grid), length(p.kappa_grid))
+        length(p.z_grid), length(p.eps_grid), length(p.kappa_grid),
+        p.pSS, p.pHH)
     path = joinpath(dir, name)
     jldsave(path; eq = result.eq, params = p)
     return path

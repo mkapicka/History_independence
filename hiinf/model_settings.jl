@@ -6,19 +6,39 @@
 # passed to `make_history_independent_params`.
 const SETTINGS = (;
     # dimensions
-    J = 39,
-
-    # Households are born at real age 22, which is model age 1 (model age is
-    # the 1-based array index, so real age = age0_real + model age - 1).
+    # INFINITE HORIZON: no J. The agent's problem is stationary, so V and the
+    # policies carry no age index. What remain are solver controls; see the
+    # header of solve_history_independent_tax.jl.
+    maxAge = 600,
+    tolV = 1e-8,
+    maxIterV = 2000,
+    howardSteps = 40,
+    tolDist = 1e-10,
+    # Warning threshold on drift RELATIVE to Y (see HIParams). Inf silences the
+    # warning; 1e-8 is the setting that raises it, sized so the 1.7e-09 a
+    # converged solve shows passes while a genuinely unsettled path, which runs
+    # 1e-04 and worse, is caught.
     #
-    # Cross-sectional statistics are averaged over MODEL ages stats_age_lo to
-    # stats_age_hi inclusive. Kaplan-Violante (2014) Table 2 build the 0.588
-    # target on a 2001 SCF cross-section of households aged 22-59, which with
-    # age0_real = 22 is model ages 1-38. stats_age_hi = 0 means "through the
-    # last age" and is resolved to J+1 by `hi_params`; that covers every age
-    # and reproduces the behaviour from before the window existed, which is
-    # why it is the default here. Set 1 and 38 to match the data moment.
-    # Initial asset holdings at model age 1. a0 = 0.0 reproduces the original
+    # SILENCED DELIBERATELY, and it matters most during a CALIBRATION.
+    # `warn_if_unsettled` runs from `attach_elapsed`, i.e. once per returned
+    # equilibrium, and a beta/bbar calibration returns one per solve -- 18 to 75
+    # of them. The warning was drowning the search table it was printed next to.
+    #
+    # It has no teeth at the horizons this is run at. The closed-form PV tail it
+    # guards carries qGov^maxAge, which at maxAge = 1500 and qGov = 0.98357431
+    # is 1.6e-11. Against an observed worst drift of 1.9e-04 of Y, the implied
+    # budget error is at most 5.7e-12 even on the pessimistic assumption that
+    # the path decays at 0.9993 per period -- seven orders below
+    # tolGovBudget = 1e-05.
+    #
+    # THE COST. Inf switches the check off for EVERY run, not only the long
+    # ones, and the same drift at maxAge = 100 would carry qGov^100 = 0.19 and
+    # cost ~5e-05, ABOVE tolGovBudget rather than far below. Restore 1e-8 before
+    # trusting a short-horizon run, or read `eq.diagnostics.finalDrift`, which
+    # is recorded whatever this is set to.
+    tolDriftRel = Inf,
+
+    # Initial asset holdings at model age 0. a0 = 0.0 reproduces the original
     # "born with nothing" condition exactly. Set a0_scales_with_kappa = true to
     # read a0 as a multiplier on exp(kappa), matching how wages and the
     # borrowing limit already scale with the permanent type.
@@ -53,15 +73,6 @@ const SETTINGS = (;
     eta = 2.0,
     phi = 1.0,
     tau = 0.181,
-
-    # Impact-MPC windfall and the low-asset threshold, in model asset units,
-    # both on Discrete_HA's 2019 numeraire of $72,000 mean annual income
-    # (`+setup/Params.m`): $500/$72,000 = 0.0069444 and $1,000/$72,000 =
-    # 0.0138889 of mean annual labor income, times this calibration's mean
-    # labor income of 0.9112. Re-derive both after a recalibration; the summary
-    # prints each as a ratio to the realized mean so drift is visible.
-    mpc_shock = 0.0063278,
-    mpc_lowasset_threshold = 0.0126556,
 
     # shocks
     rho = 0.958,

@@ -1,0 +1,235 @@
+# 1. Calibration
+# THIS CALIBRATION CALIBRATES TO AVERAGES OVER THE WHOLE LIFE-CYCLE
+Calibration with the default settings. Running the file as a script produces the same log and archives it in `calibration_results/` automatically.
+Parameter override calib = CalibrationParams(inner_xtol = 1e-7) and lambdaMin = 1e-6 needed to ensure convergence of the calibration search: the default lambdaMin=0.2 was not sufficient (The calibration searches qSav over [0.900, 1.040]. At the lower end, qSav = 0.900 is an 11.1% return on saving, and compounded over 100 periods that gives enormous assets — so the budget-clearing λ collapses to 0.059, below lambdaMin = 0.20.)
+
+ 
+julia --project=. -t 5
+include("calibrate_history_independent_tax_beta.jl")
+
+result_calib = calibrate_history_independent_tax_beta(
+           nZ=15, nEps=11, nKappa=5, nA=151,
+           qSav=1/1.0167, qBorr=1/1.0167, qGov=1/1.0167,
+           calib = BetaCalibration(asset_moment = :median,
+                                   medianAssetsToMeanLaborIncome = 62442/52745,
+                                   inner_xtol = 1e-7, beta_min = 0.978, beta_max = 0.982),
+           aMax=50.0, lambdaMin = 1e-6, tau=0.181,
+           age0_real = 21, stats_age_lo = 2, stats_age_hi = 39)
+
+=== Beta calibration targets ===
+median assets / mean labor income        = 1.18384681
+true borrowing limit / mean labor income = 0.18000000
+share negative liquid assets             : NOT TARGETED (reported only)
+prices (GIVEN, not calibrated)           : qSav=0.983574 qBorr=0.983574 qGov=0.983574
+                                         : one price everywhere, so PV(T) = G telescopes exactly
+beta bracket                             : [0.978000, 0.982000]  (beta_max is 0.001574 below qSav)
+relaxation time at the ceiling           : 625 periods against maxAge = 600   [under 3 relaxation times: expect a drift warning]
+
+=== Calibration search ===
+start:   beta=0.978000 bbar=-0.172300
+
+eval   beta        bbar        median/LI   trueBL/LI   neg share max
+   1  0.97800000  -0.17230000  0.87031580  0.17768075  0.08583715 3e-01
+   2  0.98070633  -0.17454989  1.18393923  0.17826008  0.06251304 2e-03
+   3  0.98071573  -0.17625489  1.18360235  0.17997448  0.06298855 2e-04
+
+=== History-independent tax infinite-horizon solver ===
+Options:
+  horizon                     = infinite (VFI fixed point)
+  maxAge (forward pass length)= 600
+  statistics window (model age)= 2-39 (real age 22-59)
+  tolV, maxIterV, howardSteps = 1.0e-08, 2000, 40
+  tolDist (settling report)   = 1.0e-10
+  shock grid dimension nZ     = 15
+  shock grid dimension nEps   = 11
+  shock grid dimension nKappa = 5
+  z_discretization_method     = :rouwenhorst  (alternatives: :rouwenhorst, :tauchen)
+  tauchen_width               = 3.000  (used when z_discretization_method = :tauchen)
+  asset grid dimension nA     = 151
+  asset_grid_method           = :nonuniform  (alternatives: :nonuniform, :linear)
+  asset_grid_borrow_share     = 0.350
+  asset_grid_curvatures       = borrow 1.800, save 2.500
+  asset_grid_zero_band        = share 0.300, width 0.080
+  asset_grid_bounds           = [-1.746322, 50.000000]
+  bbar                        = -0.17625489153673912
+  qSav                        = 0.983574309039048     (price of saving,    a' >= 0)
+  qBorr                       = 0.983574309039048     (price of borrowing, a' < 0)
+  qGov                        = 0.983574              (government discount price)
+  G                           = 0.000000              (government spending)
+  asset_choice_method         = :grid_search  (alternatives: :grid_search, :interpolate)
+  labor_solver                = :hybrid_newton  (alternatives: :brent, :hybrid_newton, :grid)
+  labor_bounds                = [1.00e-08, 5.0000]
+  terminal_borrowing          = :zero
+  lambda_solver               = :brent  (Roots.jl; fallback: grid search over 15 values)
+  lambda_bracket              = [0.000001, 2.500000], tol = 1.00e-05
+  collect_distributions       = true
+
+lambda = 0.00000100: residual = 8.81928407e-01
+lambda = 2.50000000: residual = -1.32185920e+00
+lambda eval 1: lambda=1.00046953, residual=1.44569892e-02
+lambda eval 2: lambda=1.01696262, residual=-2.53501599e-04
+lambda eval 3: lambda=1.01667840, residual=1.50450162e-06
+lambda eval 4: lambda=1.01668007, residual=-1.67474531e-08
+lambda root: lambda=1.01668007, residual=-1.67474531e-08
+┌ Warning: RETURNED equilibrium: cross-section drift at maxAge exceeds tolDriftRel for at least one kappa; the closed-form PV tail assumes the path has settled.
+│ maxAge = 600, tolDriftRel = 1.0e-08, Y[end] = 0.837149
+│ qSav = 0.98357431, qBorr = 0.98357431, bbar = -0.17625489, lambda = 1.01668007
+│ kappa 1 (-0.9585): drift 1.179e-06 (1.4e-06 of Y)  convergedAge never
+│ kappa 2 (-0.4813): drift 2.631e-05 (3.1e-05 of Y)  convergedAge never
+│ kappa 3 (-0.0505): drift 4.982e-05 (6.0e-05 of Y)  convergedAge never
+│ kappa 4 ( 0.3803): drift 1.315e-08 (1.6e-08 of Y)  convergedAge never
+│ kappa 5 ( 0.8575): drift 2.074e-11 (2.5e-11 of Y)  convergedAge 538
+│ This is a CONVERGED equilibrium being returned, not a lambda probe. During a calibration it is still one instrument triple among many; check qSav/qBorr/bbar above against the calibrated values. Judge by the relative column; raise maxAge if it is not many orders below Y.
+└ @ Main ~/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hiinf/solve_history_independent_tax.jl:691
+WARNING: upper bound is binding.
+  asset upper bound       = BINDING (share = 5.61940056e-06, bound = 50.00000000, material max a' = 50.00000000, slack = 0.00000000e+00)
+total solve time          = 82.851 seconds
+
+=== Beta calibration result ===
+converged                = true (2 sweeps, 75 solves, 4979.5 s)
+beta                       = 0.9807157252
+bbar                       = -0.1762548915
+qSav / qBorr / qGov (given) = 0.983574 / 0.983574 / 0.983574
+
+moment                                          model       target    residual
+median assets / mean labor income          1.18360235   1.18384681   -2.44e-04
+true borrowing limit / mean labor income   0.17997448   0.18000000   -2.55e-05
+share negative liquid assets               0.06298855 not targeted          --
+mean assets / mean labor income            2.32021426 not targeted          --
+
+PV(Y) - PV(C) - PV(G)    = -1.020e-06   (exact identity when q = qGov)
+government budget residual = -1.675e-08
+
+Note the `WARNING: upper bound is binding` in the solver log. At the calibrated point a mass share of `3.87e-7` sits exactly at `aMax = 15`, with zero slack. The share is far too small to move the targeted moments, but `aMax` is touching and should be raised before using this calibration for anything sensitive to theright tail of the asset distribution.
+
+
+# 2. Equilibrium computation
+The calibrated instruments are used to compute the equilibrium of the model. The transcript below is reproducible: after the Section 1 setup it is the output of `run_history_independent_tax()`,
+
+```
+result_run = run_history_independent_tax(
+                  nZ = 15, nEps = 11, nKappa = 5, nA = 151,
+                  beta  = result_calib.beta,
+                  qSav  = 1/1.0167,
+                  qBorr = 1/1.0167,
+                  qGov  = 1/1.0167,
+                  bbar  = result_calib.bbar,
+                  aMax  = 50.0,
+                  lambdaMin = 1e-6, tau=0.181,
+                  age0_real = 21, stats_age_lo = 2, stats_age_hi = 39);
+
+=== History-independent tax infinite-horizon solver ===
+Options:
+  horizon                     = infinite (VFI fixed point)
+  maxAge (forward pass length)= 600
+  statistics window (model age)= 2-39 (real age 22-59)
+  tolV, maxIterV, howardSteps = 1.0e-08, 2000, 40
+  tolDist (settling report)   = 1.0e-10
+  shock grid dimension nZ     = 15
+  shock grid dimension nEps   = 11
+  shock grid dimension nKappa = 5
+  z_discretization_method     = :rouwenhorst  (alternatives: :rouwenhorst, :tauchen)
+  tauchen_width               = 3.000  (used when z_discretization_method = :tauchen)
+  asset grid dimension nA     = 151
+  asset_grid_method           = :nonuniform  (alternatives: :nonuniform, :linear)
+  asset_grid_borrow_share     = 0.350
+  asset_grid_curvatures       = borrow 1.800, save 2.500
+  asset_grid_zero_band        = share 0.300, width 0.080
+  asset_grid_bounds           = [-1.746322, 50.000000]
+  bbar                        = -0.17625489153673912
+  qSav                        = 0.983574309039048     (price of saving,    a' >= 0)
+  qBorr                       = 0.983574309039048     (price of borrowing, a' < 0)
+  qGov                        = 0.983574              (government discount price)
+  G                           = 0.000000              (government spending)
+  asset_choice_method         = :grid_search  (alternatives: :grid_search, :interpolate)
+  labor_solver                = :hybrid_newton  (alternatives: :brent, :hybrid_newton, :grid)
+  labor_bounds                = [1.00e-08, 5.0000]
+  terminal_borrowing          = :zero
+  lambda_solver               = :brent  (Roots.jl; fallback: grid search over 15 values)
+  lambda_bracket              = [0.000001, 2.500000], tol = 1.00e-05
+  collect_distributions       = true
+
+lambda = 0.00000100: residual = 8.81928407e-01
+lambda = 2.50000000: residual = -1.32185920e+00
+lambda eval 1: lambda=1.00046953, residual=1.44569892e-02
+lambda eval 2: lambda=1.01696262, residual=-2.53501599e-04
+lambda eval 3: lambda=1.01667840, residual=1.50450162e-06
+lambda eval 4: lambda=1.01668007, residual=-1.67474531e-08
+lambda root: lambda=1.01668007, residual=-1.67474531e-08
+┌ Warning: RETURNED equilibrium: cross-section drift at maxAge exceeds tolDriftRel for at least one kappa; the closed-form PV tail assumes the path has settled.
+│ maxAge = 600, tolDriftRel = 1.0e-08, Y[end] = 0.837149
+│ qSav = 0.98357431, qBorr = 0.98357431, bbar = -0.17625489, lambda = 1.01668007
+│ kappa 1 (-0.9585): drift 1.179e-06 (1.4e-06 of Y)  convergedAge never
+│ kappa 2 (-0.4813): drift 2.631e-05 (3.1e-05 of Y)  convergedAge never
+│ kappa 3 (-0.0505): drift 4.982e-05 (6.0e-05 of Y)  convergedAge never
+│ kappa 4 ( 0.3803): drift 1.315e-08 (1.6e-08 of Y)  convergedAge never
+│ kappa 5 ( 0.8575): drift 2.074e-11 (2.5e-11 of Y)  convergedAge 538
+│ This is a CONVERGED equilibrium being returned, not a lambda probe. During a calibration it is still one instrument triple among many; check qSav/qBorr/bbar above against the calibrated values. Judge by the relative column; raise maxAge if it is not many orders below Y.
+└ @ Main ~/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hiinf/solve_history_independent_tax.jl:691
+WARNING: upper bound is binding.
+  asset upper bound       = BINDING (share = 5.61940056e-06, bound = 50.00000000, material max a' = 50.00000000, slack = 0.00000000e+00)
+total solve time          = 32.933 seconds
+
+=== Final history-independent equilibrium ===
+lambda                     = 1.01668007
+government budget residual = -1.67474531e-08
+PV output                  = 55.18687210
+PV consumption             = 55.18687312
+mean output                = 0.85157859
+mean consumption           = 0.94969841
+settled assets             = 8.07275899
+qSav                       = 0.983574309039048
+qBorr                      = 0.983574309039048
+bbar                       = -0.17625489153673912
+solve time                 = 32.933 seconds
+
+=== Aggregate statistics: ages 2-39, real 22-59  [CALIBRATION WINDOW] ===
+mean assets / mean labor income          = 2.32021426
+median assets / mean labor income        = 1.18360235
+true borrowing limit / mean labor income = 0.17997448
+grid borrowing limit / mean labor income = 0.17161653
+share negative liquid assets             = 0.06298855
+share at effective grid borrowing bound  = 0.01936043
+share with zero assets                   = 0.00233868
+share at upper asset bound               = 0.00000562
+share at hours upper bound               = 0.00000000
+mean assets at age 22 / mean labor income = 0.18372552
+median assets at age 22 / mean labor inc. = 0.11432884
+
+=== Aggregate statistics: ages 1-600, real 21-620  [ALL AGES] ===
+mean assets / mean labor income          = 7.43284054
+median assets / mean labor income        = 2.90118980
+true borrowing limit / mean labor income = 0.18851312
+grid borrowing limit / mean labor income = 0.17954684
+share negative liquid assets             = 0.04738632
+share at effective grid borrowing bound  = 0.01726012
+share with zero assets                   = 0.00381997
+share at upper asset bound               = 0.00732788
+share at hours upper bound               = 0.00000000
+
+=== Welfare ===
+overall value function utility = -0.4542858716
+overall simulation utility     = -0.4542857774
+overall difference             = 9.41550141e-08
+kappa      prob        value function  simulation     difference
+-0.958459  0.01125741  -1.2003722605  -1.2003723504  -8.99459063e-08
+-0.481325  0.22207592  -0.8082253655  -0.8082254176  -5.21468269e-08
+-0.050500  0.53333333  -0.4542472312  -0.4542472066   2.46164705e-08
+ 0.380325  0.22207592  -0.1004019794  -0.1004015756   4.03788119e-07
+ 0.857459  0.01125741   0.2910667415   0.2910670922   3.50677753e-07
+
+# 3. Plotting
+The following command produces a series of plots illustrating the equilibrium distributions, policy functions, and other relevant statistics. The plots are saved in the `figures/` directory.
+
+```
+include("plot_history_independent_tax.jl")
+figs   = plot_history_independent_tax(result_run)
+
+=== Figures saved ===
+asset grid                = ~/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hiinf/figures/asset_grid.png
+average assets by age     = ~/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hiinf/figures/average_assets_by_age.png
+average hours by age      = ~/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hiinf/figures/average_hours_by_age.png
+assets                    = ~/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hiinf/figures/unconditional_assets.png
+hours worked              = ~/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hiinf/figures/unconditional_hours_worked.png
+consumption               = ~/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hiinf/figures/unconditional_consumption.png
+```

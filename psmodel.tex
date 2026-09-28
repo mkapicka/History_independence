@@ -1,0 +1,84 @@
+\section{Incomplete Markets with Hand-to-Mouth Agents}
+I will now relax the assumption that agents are not allowed to borrow and save by allowing them access to a risk-free bond.  To ensure that the problem remains tractable, I will restrict the tax function (\ref{HDtax}) by assuming that the history dependence parameters take the form 
+ \[
+ \theta_j = (1-\beta \mu) \mu^{j}, \quad j\geq 1.
+ \]
+
+That is, the tax function takes the form in Proposition (\ref{mainprop}), with the added assumption that both roots are the same, $\mu_1=\mu_2=\mu$. 
+The promise-keeping constraint (\ref{omeganorm}) restricts the initial value $\theta_0$ to $1-\beta\mu$, already incorporated in the tax function above. The history-independent tax system sets $\mu=0$. The above representation again allows us to write the tax function recursively by 
+ \begin{align*}
+T(y_t) = y_t  -\lambda \left(y_t  m_{t}  \right)^{(1-\tau) \theta_0}, \quad m_{t+1} = \left(y_t m_{t}\right)^{\mu}.
+\end{align*}
+
+Motivated by Proposition \ref{welfunappx}, the tax function parameter $\lambda$ is age independent.
+
+
+
+When choosing hours worked, the agents take into account the fact that their choice  will affect their tax liabilities in the future via an aggregate ''past income'' variable $m$:
+\begin{align}
+m' =  \left(e^{z\varepsilon \kappa} \ell  m\right)^{\mu}. \label{A:lom}
+\end{align}
+
+
+In addition to being heterogeneous in their wages, the agents are heterogeneous in their ability to participate in the asset market.\footnote{For simplicity, all agents face the same disutility parameter $\phi$.}   If the agents participate in the asset market, they can adjust their savings freely; if they do not, they become hand-to-mouth and consume only their after-tax labor income. Denote the agents in two states as savers ($S$) and hand-to-mouth ($H$). The probability of moving from one state to the other is exogenous, with the probability to stay in state $S$ and $H$ is $s$ and $ h$. We denote $x=(z, \varepsilon, \kappa)$ and $x'=(z', \varepsilon', \kappa)$ to be the current and next period labor market state. 
+
+The savers adjust their savings without any cost, at an intertemporal price $q$. Besides the budget constraint, they are subject to the borrowing limit $\underline{b}(z)\leq 0$. They choose consumption, savings, and hours worked to maximize
+\[
+V^S(a,m,x) = \max_{c,\ell,a'} \left\{ (1-\beta) \big(\ln c- \phi \frac { \ell^{1+\eta}}{1+\eta}  \big) +\beta  \mathbb{E} \left[ s V^S(a',m', x') +(1-s)V^H(a',m', x') | x \right] \right\}
+\]
+subject to the budget and borrowing constraints
+\begin{align}
+c +q a' &\leq \lambda \left( e^{z\varepsilon \kappa} m \ell  \right) ^{(1-\tau)\theta_0} +a, \label{A:bc} \\
+a' &\geq \underline{b}(z),\label{A:boc}
+\end{align}
+and the law of motion for past incomes  (\ref{A:lom}). 
+
+The hand-to-mouth agent's problem is similar, except they do not have access to the asset market and do not choose their savings. The evolution of assets differs for the agents with positive and negative assets. For constrained agents, positive assets accumulate with $a'=a/q$. Constrained agents with negative assets, however, must service their debt first, so that $a'=a$. This assumption not only prevents debt from exploding but also represents a more substantive economic asymmetry, in which servicing interest payments takes priority over consumption, while positive asset returns are still inaccessible, perhaps due to a lack of liquidity, and are rolled over.
+\[
+V^H(a,m, x) = \max_{c,\ell} \left\{ (1-\beta) \left(\ln c- \phi \frac {\ell^{1+\eta} }{1+\eta}  \right) +\beta  \mathbb{E} \left[ h V^H(a',m', x') +(1-h) V^S(a',m', x') | x \right] \right\}
+\]
+subject to
+\begin{align*}
+	c  &=\lambda \left( e^{z\varepsilon \kappa}  m \ell\right) ^{(1-\tau)\theta_0} + \mathbbm{1}_{\{a<0\}}(1-q)a \\
+	a' &=\frac{a}{q}\mathbbm{1}_{\{a\geq0\}} + a\mathbbm{1}_{\{a<0\}}
+\end{align*}
+the law of motion for past incomes  (\ref{A:lom}).
+% and the law of motion for assets described above. 
+
+The initial distribution over market-access states is assumed to be stationary, and so the fraction of savers and hand-to-mouth agents is constant over time, with the mass of hand-to-mouth agents $\pi_{H}=(1-s)/(2-s-h)$. The setap encompasses two standard models as special cases. The no-savings model of the previous section is obtained when $s=0$, $h=1$, and everyone is hand-to-mouth. A standard Bewley-Aiyagari model is recovered when $s=1$ and $h=0$, and everyone is unconstrained. Finally, a mode where the access to credit markets is iid is obtained when $s=1-h$, in which case the mass of hand-to-mouth agents $\pi_{H}=h$.
+
+%The optimal policy functions are $c(a,s,z, \varepsilon, \kappa)$, $\ell(a,s,z, \varepsilon, \kappa)$ and $a'(a,s,z, \varepsilon, \kappa)$. 
+
+ 
+ 
+\paragraph{Aggregation.} 
+
+
+Starting from an initial value of the persistent component $z_{-1}=0$ and initial zero assets $a_0=0$, the model generates the distribution of assets, consumption, and incomes for each age, and the resulting aggregates $A_j$, $C_j$, and $Y_j$. The aggregate resource constraint equals the present value of consumption to the present value of earnings, 
+\begin{align}
+(1-q)\sum_{j=0}^{\infty} q^{j}(C_j - Y_j) + G = 0. \label{Bewley:govtbc}
+\end{align}
+
+We take the intertemporal price $q$ as given. The government's problem is, for any history dependence parameter $\mu$ and any progressivity wedge $\tau$, to find the level tax parameter $\lambda$ such that (\ref{Bewley:govtbc}) holds. 
+
+\paragraph{History independent tax.} If tax is history independent with $\mu=0$, the $m=1$ always, and the problem reduces to the following one.
+
+The savers adjust their savings without any cost, at an intertemporal price $q$. Besides the budget constraint, they are subject to the borrowing limit $\underline{b}(z)\leq 0$. They choose consumption, savings, and hours worked to maximize
+\[
+V^S(a,x) = \max_{c,\ell,a'} \left\{ (1-\beta) \big(\ln c- \phi \frac { \ell^{1+\eta}}{1+\eta}  \big) +\beta  \mathbb{E} \left[ s V^S(a',x') +(1-s)V^H(a',x') | x \right] \right\}
+\]
+subject to the budget and borrowing constraints
+\begin{align}
+c +q a' &\leq \lambda \left( e^{z\varepsilon \kappa} \ell  \right) ^{1-\tau} +a, \label{Ahi:bc} \\
+a' &\geq \underline{b}(z).\label{Ahi:boc}
+\end{align}
+
+The hand-to-mouth agent's problem is similar, except they do not have access to the asset market and do not choose their savings. The evolution of assets differs for the agents with positive and negative assets. For constrained agents, positive assets accumulate with $a'=a/q$. Constrained agents with negative assets, however, must service their debt first, so that $a'=a$. This assumption not only prevents debt from exploding but also represents a more substantive economic asymmetry, in which servicing interest payments takes priority over consumption, while positive asset returns are still inaccessible, perhaps due to a lack of liquidity, and are rolled over.
+\[
+V^H(a,x) = \max_{c,\ell} \left\{ (1-\beta) \left(\ln c- \phi \frac {\ell^{1+\eta} }{1+\eta}  \right) +\beta  \mathbb{E} \left[ h V^H(a',x') +(1-h) V^S(a',x') | x \right] \right\}
+\]
+subject to
+\begin{align*}
+	c  &=\lambda \left( e^{z\varepsilon \kappa} \ell\right) ^{1-\tau} + \mathbbm{1}_{\{a<0\}}(1-q)a \\
+	a' &=\frac{a}{q}\mathbbm{1}_{\{a\geq0\}} + a\mathbbm{1}_{\{a<0\}}.
+\end{align*}

@@ -10,7 +10,7 @@ Calibrate the model to match the three targets in `CalibrationParams` by adjusti
 Make sure you are in the current directory of the repository, or adjust the path to accordingly. The calibration file itself includes the model settings and solver, so you do not need to include those separately. 
 
 ```julia
-include(raw"calibrate_history_independent_tax_Claude.jl")
+include("calibrate_history_independent_tax_Claude.jl")
 result = calibrate_history_independent_tax()
 ``` 
 
@@ -42,8 +42,8 @@ result = calibrate_history_independent_tax(
 |------------------------------------------------|-----------------------------------------------------------------|
 | **Targets**                                    |                                                                 |
 | `meanAssetsToMeanLaborIncome` (`0.588`)        | Target (i) under the default `asset_moment = :mean`             |
-| `medianAssetsToMeanLaborIncome` (`0.043`)      | Target (i) under `asset_moment = :median`                       |
-| `trueBorrowingLimitToMeanLaborIncome` (`0.18`) | Target (ii); see the moment (ii) note below                     |
+| `medianAssetsToMeanLaborIncome` (`0.0498`)     | Target (i) under `asset_moment = :median`                       |
+| `trueBorrowingLimitToMeanLaborIncome` (`0.185`) | Target (ii); see the moment (ii) note below                     |
 | `shareNegativeLiquidAssets` (`0.26`)           | Target (iii)                                                    |
 | `asset_moment` (`:mean`)                       | Picks which asset ratio is targeted; the other is left free     |
 | **Search**                                     |                                                                 |
@@ -123,7 +123,7 @@ tolerance) are reported with `@warn` when they occur; `eq` records only
 | `unconditionalDistributions`                       | `NamedTuple`, see below                                |
 
 **Note on moment (ii).** A borrowing limit exists only at ages `j = 0,…,J-1`. At the terminal age `j = J` the model imposes `a' ≥ 0` instead, so no limit is defined there. Both `meanBorrowingLimit` and `meanEffectiveGridBorrowingLimit` average `-bbar · exp(kappa + rho z)` over the mass of ages `j = 0,…,J-1`,
-excluding the terminal age rather than counting it as a zero. Target (ii) is matched against that average, so `meanBorrowingLimitToMeanLaborIncome = 0.180` is the limit households actually face. The denominator is unchanged: mean labor income remains the whole-population mean over all `nAge = 40` ages.
+excluding the terminal age rather than counting it as a zero. Target (ii) is matched against that average, so `meanBorrowingLimitToMeanLaborIncome = 0.185` is the limit households actually face. The denominator is unchanged: mean labor income remains the whole-population mean over all `nAge = 40` ages.
 
 ### `result.eq.statistics.unconditionalDistributions`
 Populated when `collect_distributions = true` (the default); with it off, the

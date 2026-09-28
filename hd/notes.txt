@@ -1,0 +1,206 @@
+ find untuition for why the Bewley line is convex while the nosabings line is concave
+
+⏺ Good question — and the decomposition in oneroot.jl can test the intuition rather than just assert it. The cost P splits into transitory, persistent and permanent parts:
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia" && julia --project=. -t 2 -e '
+      using Printf…)
+  ⎿  variance shares: transitory eps=0.249  persistent omega=0.440  permanent kappa+phi=0.311
+
+     mu         P_0(eps)  P_rho(om)  P_1(perm)    P total
+     … +12 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /Users/mkapicka/Downloads/codes
+  ⎿  Allowed by auto mode classifier
+
+⏺ The decomposition answers it, and it corrected my first guess. Three channels, with variance shares transitory 0.249, persistent 0.440, permanent 0.311:
+
+  ┌──────────────┬─────────────────┬──────────────────┬────────────────┐
+  │      μ       │ P₀ (transitory) │ P_ρ (persistent) │ P₁ (permanent) │
+  ├──────────────┼─────────────────┼──────────────────┼────────────────┤
+  │ 0.00         │ 1.0000          │ 1.0000           │ 1.0000         │
+  ├──────────────┼─────────────────┼──────────────────┼────────────────┤
+  │ 0.20         │ 0.6789          │ 0.9850           │ 1.0016         │
+  ├──────────────┼─────────────────┼──────────────────┼────────────────┤
+  │ 0.60         │ 0.2747          │ 0.9512           │ 1.0211         │
+  ├──────────────┼─────────────────┼──────────────────┼────────────────┤
+  │ 0.90         │ 0.0832          │ 0.8823           │ 1.1399         │
+  ├──────────────┼─────────────────┼──────────────────┼────────────────┤
+  │ 0.98         │ 0.0449          │ 0.8652           │ 1.4727         │
+  ├──────────────┼─────────────────┼──────────────────┼────────────────┤
+  │ minimized at │ μ = 0.999       │ μ = 0.964        │ μ = 0          │
+  └──────────────┴─────────────────┴──────────────────┴────────────────┘
+
+  Why no savings is concave
+
+  Almost the entire early gain is P₀, the transitory channel: it collapses from 1.00 to 0.68 by μ = 0.2 and to 0.27 by μ = 0.6. Even a short memory averages iid noise out of the tax base,
+  and averaging noise is cheap — the first increment of memory buys the most, which is exactly concavity.
+
+  Meanwhile P₁ rises — 1.00 → 1.14 → 1.47. History dependence cannot insure a permanent shock, because such a shock shifts every lag equally so there is nothing to average against; worse,
+  a long-memory tax keeps charging you for a permanent draw you can never outrun. So the curve is a race between P₀ falling fast and P₁ rising slowly, and the peak at μ = 0.8785 is where
+  the rising term finally wins.
+
+  Why Bewley is convex
+
+  Savings are a near-perfect substitute for exactly the channel that drives the no-savings concavity. A buffer stock of liquid assets self-insures transitory shocks almost completely, so
+  the P₀ gain is already banked — the tax system averaging out last year's ε adds nothing a bond has not already done. That removes the steep early rise, which is why your red curve is
+  flat and even slightly negative out to μ₂ ≈ 0.4: memory there is pure duplication, and it distorts labour supply intertemporally for no insurance in return.
+
+  What assets are bad at is the persistent component, ρ = 0.958 with the largest share at 0.440. A single risk-free asset self-insures a shock with a 24-period half-life poorly — you would
+  have to accumulate implausibly, and the borrowing limit binds on the way down. That risk is left on the table for the tax system to handle.
+
+  And P_ρ only responds at high μ: it falls 1.5% by μ = 0.6 but reaches its minimum at μ = 0.964. Memory has to be roughly as persistent as the risk it insures. So with savings the gain is
+  governed by a channel that is nearly flat until μ approaches ρ, then bends sharply — convexity.
+
+  The check that makes it more than a story
+
+  Your Bewley optimum is μ₂ = 0.9511, and P_ρ is minimized at μ = 0.9640. Those nearly coincide. The no-savings optimum sits far below both at 0.8785, because there the answer is a
+  share-weighted compromise between P₀ (which wants μ → 1) and P₁ (which wants μ = 0).
+
+  So: without savings the tax is chasing transitory risk and lands at 0.88; with savings that job is already done, the tax is left chasing persistent risk, and it lands near the root that
+  minimizes P_ρ. The change in curvature and the shift in the optimum are the same fact seen twice.
+
+  One caveat on rigour: the P decomposition is the no-savings model's, so this maps intuition across models rather than deriving the Bewley curvature. The shock process is identical in
+  both, which is what makes the mapping legitimate — but a direct decomposition of the Bewley welfare would be a stronger test if you want it for the paper.
+
+** Question 2 **
+
+  ❯ if one-root history dependence actively hurts on permanent shocks under no savings, what happens in Bewley? Is it still true?
+
+⏺ Good question — and it's testable with what's already on disk. Let me check the shock structure and the low-μ end of the Bewley sweep.
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia" && echo "=== varianceShares / phi / kappa in no-savings model ===…)
+  ⎿  === varianceShares / phi / kappa in no-savings model ===
+     10:# sum σκ² + σφ² throughout (effvar, varianceShares). Only the finite-horizon model
+     11-# (finite_horizon.jl) distinguishes them, because preference σφ alone moves hours.
+     … +24 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /Users/mkapicka/Downloads/codes
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia" && echo "=== phi / kappa params ===" && grep -n "φ\|phi\|κ\|kappa…)
+  ⎿  === phi / kappa params ===
+     7:# The permanent block is kept as its two structural pieces, σκ (productivity) and
+     8:# σφ (preference), rather than lumped together. They enter consumption identically
+     … +5 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /Users/mkapicka/Downloads/codes
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hd" && echo "=== kappa in hd: fixed effect or random walk?…)
+  ⎿  === kappa in hd: fixed effect or random walk? ===
+     model_settings.jl:70:    sigma_kappa = sqrt(0.065 + 0.036),
+     model_settings.jl:73:    nKappa = 3,
+     … +22 lines (ctrl+o to expand)
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hd" && echo "=== income process in hd ===" && grep -n "logI…)
+  ⎿  === income process in hd ===
+     14:#   alpha = :paper     the paper mixture (rho - mu1)/(mu2 - mu1), 1 if mu1 = mu2.
+     25:# NOTE ON THE ROOTS. alpha lands in [0, 1] iff mu1 <= rho <= mu2, i.e. the
+     … +8 lines (ctrl+o to expand)
+
+⏺ κ is build_iid_normal_shock drawn once at birth in the Bewley model, and the solver does "backward induction for one kappa" — a fixed effect, never redrawn. That's a different object
+  from what P_1 prices. Let me confirm the no-savings side.
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia" && echo "=== how is the permanent block treated in the infinite-h…)
+  ⎿  === how is the permanent block treated in the infinite-horizon cost? ===
+     26:# effective shock variance σ² and the welfare level term ν. The permanent block
+     27:# is the sum of its productivity (κ) and preference (φ) pieces, σκ² + σφ².
+     … +28 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /Users/mkapicka/Downloads/codes
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia" && julia --project=. -e '
+      include("oneroot.jl")…)
+  ⎿  mu=0.3000  P_1=1.003783   P_rho(rho=0.999999)=1.003782   diff=6.30e-07
+     mu=0.6000  P_1=1.021125   P_rho(rho=0.999999)=1.021123   diff=1.76e-06
+     mu=0.8785  P_1=1.114376   P_rho(rho=0.999999)=1.114369   diff=6.51e-06
+     mu=0.9500  P_1=1.259401   P_rho(rho=0.999999)=1.259388   diff=1.37e-05
+  ⎿  Shell cwd was reset to /Users/mkapicka/Downloads/codes
+  ⎿  Allowed by auto mode classifier
+
+⏺ Confirmed: P_1 is exactly the ρ→1 limit of P_ρ, so it prices a random walk with per-period innovations of variance σκ²+σφ² = 0.101. Now the Bewley sweep's low-μ end:
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hd" && JULIA_LOAD_PATH="../..:.:@stdlib" julia -e '
+      include…)
+  ⎿  mu2      gain(%)
+     0.0000   +0.0000
+     0.0422   +0.0115
+     … +45 lines (ctrl+o to expand)
+  ⎿  Allowed by auto mode classifier
+
+⏺ The Bewley curve does go negative: it dips to −0.033% at μ2 ≈ 0.28, crosses back through zero at μ2 ≈ 0.42, and only then climbs to its +1.63% optimum at 0.9511. So one-root history
+  dependence hurts in Bewley too — over a region, not just at a point. Let me check whether the no-savings decomposition predicts exactly that once the transitory channel is switched off:
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia" && julia --project=. -e '
+      include("oneroot.jl"); using Printf…)
+  ⎿  k = 0.108972   shares: eps=0.249 omega=0.44 phi=0.311
+
+       mu      P_0      P_rho     P_1  | contrib(%): trans  persist   perm  | total   NO-TRANS
+     … +17 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /Users/mkapicka/Downloads/codes
+  ⎿  Allowed by auto mode classifier
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia" && julia --project=. -e '
+      include("oneroot.jl"); using Printf…)
+  ⎿  k = 0.108972   shares: eps=0.249 omega=0.440 phi=0.311
+
+       mu      P_0      P_rho      P_1   | contrib(%): trans  persist    perm  |  total   NO-TRANS
+     … +12 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /Users/mkapicka/Downloads/codes
+  ⎿  Allowed by auto mode classifier
+
+⏺ That's decisive, and it says the answer is no. Killing the transitory channel in the no-savings model does not reproduce the Bewley curve — it peaks at only +0.185% at μ = 0.765 and then
+  collapses to −0.955% at 0.98, whereas Bewley climbs to +1.63% and peaks at 0.9511. Let me smoke-test whether a permanent-shock-only Bewley run is cheap enough to settle it directly.
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hd" && timeout 900 julia --project=. -t 4 -e '
+      include("run…)
+  ⎿  (eval):1: command not found: timeout
+  ⎿  Allowed by auto mode classifier
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hd" && julia --project=. -t 4 -e '
+      include("run_history_dep…)
+  ⎿  ERROR: FieldError: type NamedTuple has no field `overallValueFunction`, available fields: `eq`, `params`
+     Stacktrace:
+      [1] getindex(t::@NamedTuple{eq::@NamedTuple{lambda::Float64, govBudgetResidual::Float64, govBudgetLHS::Float64, govBudgetRHS::Float64, C::Vector{Float64}, H::Vector{Float64}, Y:
+     … +18 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+  ⎿  Allowed by auto mode classifier
+
+⏺ The run works (that was just my field access). Let me settle it directly — run the Bewley model with one shock at a time, which is the exact analogue of the no-savings channel
+  decomposition, since 100·k·s_x·(1−P_x) is the welfare gain of a single-shock no-savings model.
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hd" && grep -n "sigma_z\|sigma_eps\|sigma_kappa\|sigma_omeg…)
+  ⎿  26:# roots BRACKET the income persistence rho = 0.958. An alpha outside [0, 1]
+     43:    # bracket rho = 0.958 as required, so with alpha = :paper below,
+     67:    rho = 0.958,
+     … +3 lines (ctrl+o to expand)
+
+  Made 1 scratchpad edit +26 (ctrl+o to expand)
+
+⏺ Shock primitives match exactly (ρ = 0.958, σω² = 0.017, σε² = 0.081, σκ² = 0.101). Launching the channel sweep:
+
+⏺ Bash(cd "/Users/mkapicka/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley/hd" && julia --project=. -t 4 /private/tmp/claude-501/-User…)
+  ⎿  Running in the background (↓ to manage)
+  ⎿  Allowed by auto mode classifier
+
+⏺ While that runs, here's the answer.
+
+  No — and the main reason is that the Bewley model does not contain the shock P_1 prices. Three points.
+
+  First, the objects differ. P_1 is exactly the ρ→1 limit of P_ρ (verified above to 6.5e-6), so it prices a random walk with per-period permanent innovations of variance 0.101. The Bewley
+  permanent block is build_iid_normal_shock("kappa", …) with sigma_kappa = sqrt(0.065 + 0.036) — the same 0.101, but drawn once at birth and never redrawn; the solver literally runs
+  "backward induction for one kappa". A fixed effect and a random walk with equal innovation variance are not the same risk.
+
+  Second, the mechanism attenuates rather than disappearing. The penalty is mistiming: the tax base lags a shock the household cannot outrun. Against a random walk that recurs every period
+  forever, because new permanent innovations keep arriving and the base never catches up. Against a fixed effect it happens once — s2 = 0 at birth, so the base starts at history
+  independence and converges up to κ geometrically at rate μ, under-taxing high-κ households and over-taxing low-κ ones along the way. That is regressive relative to history independence,
+  so the penalty is real; but it is a transitional cost that dies out instead of being replenished. The bound on that concession matters: at μ = 0.95 the catch-up takes 1/(1−μ) = 20
+  periods of a 40-period life, so "transitional" still covers half the working life.
+
+  Third, the sweep confirms the decomposition does not carry over. Switching off the transitory channel in the no-savings model gives a curve peaking at just +0.185% at μ = 0.765 and then
+  collapsing to −0.955% at 0.98 — that collapse is P_1. The Bewley curve does the opposite, climbing to +1.63% at 0.9511. The permanent penalty that turns the no-savings curve down at
+  0.765 is largely absent in Bewley, which is exactly why the Bewley optimum can sit at 0.95 rather than backing off to 0.88.
+
+  One genuine finding in the other direction: the Bewley curve does go negative, from μ2 = 0.127 to 0.41, bottoming at −0.033% near 0.28. That is a coherent eight-point arc rather than a
+  single stray value, so it is signal, not solver noise. But it is not the permanent channel — at μ = 0.28 the catch-up is 1.4 periods, so κ is priced in almost immediately. A reasonable
+  guess is that short memory is the worst of both worlds once savings exist: θ₀ = 1 − βμ = 0.73 puts 27% of the tax base on lags, which adds tax-timing risk that the buffer stock has to
+  absorb, while averaging over only ~1.4 periods does too little to cut tax-base variance. Without savings that same short memory still buys +1.21% from the transitory channel, which
+  swamps the cost; with savings the transitory gain is already taken and only the cost is left.
+
+  The one-shock-at-a-time Bewley runs now in flight will test that directly — they're the exact analogue of the no-savings channels, since 100·k·s_x·(1−P_x) is the welfare gain of a
+  single-shock no-savings model. I'll report when they land. Note in advance that the Bewley channels will not sum to the total the way the no-savings ones do: the decomposition is exactly
+  additive only because the no-savings allocation is closed-form and log-quadratic, whereas in Bewley the shocks interact through the asset distribution and the borrowing constraint.

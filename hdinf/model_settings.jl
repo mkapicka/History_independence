@@ -16,11 +16,11 @@
 # :paper stays consistent with them. Use a number when alpha is an object of
 # study, :paper when the roots are meant to be the optimal ones.
 #
-# theta0 is NOT set here. It is derived from (alpha, mu1, mu2, beta, J) by
-#   theta0 = 1 / sum_{s=0}^{J} beta^s (alpha*mu1^s + (1-alpha)*mu2^s),
-# the FINITE-horizon normalization, matching build_theta in the no-savings
-# code, so theta0 depends on J as well as on alpha and the roots. Adding
-# theta0 back as a setting is a MethodError, not a silent override.
+# theta0 is NOT set here. It is derived from (alpha, mu1, mu2, beta) by
+#   theta0 = 1 / ( alpha/(1-beta*mu1) + (1-alpha)/(1-beta*mu2) ),
+# the INFINITE-horizon normalization, matching infinite_horizon.jl in the
+# no-savings code. Adding theta0 back as a setting is a MethodError, not a
+# silent override.
 #
 # NOTE ON THE ROOTS. alpha lands in [0, 1] iff mu1 <= rho <= mu2, i.e. the
 # roots BRACKET the income persistence rho = 0.958. An alpha outside [0, 1]
@@ -42,13 +42,11 @@ const HD_SETTINGS = (;
     # Bewley economy is solved at the analytical model's optimal tax. They
     # bracket rho = 0.958 as required, so with alpha = :paper below,
     #   alpha  = (rho - mu1)/(mu2 - mu1) = 0.922170   (benchmark: 0.9222)
-    #   theta0 = 0.283385 at J = 39
-    # theta0 does NOT match the benchmark's 0.2698: that figure is the
-    # INFINITE-horizon normalization, while theta0 here is the finite-J one and
-    # so depends on J (0.283385 at J = 39, 0.270247 at J = 99, approaching
-    # 0.269711 as J grows). Compare against the finite-horizon no-savings
-    # driver (main_finite/solve_finite_recursive at the same J), not against
-    # the infinite-horizon numbers.
+    #   theta0 = 0.269711
+    # theta0 now DOES match the no-savings benchmark's 0.2698, because both use
+    # the infinite-horizon normalization. The finite-J hd solver gives 0.283385
+    # at J = 39 instead. Compare this solver against infinite_horizon.jl, not
+    # against main_finite.
     #
     # COST NOTE: mu2 = 0.9877 makes the s2-grid width scale as
     # mu2/(1-mu2) = 80.3 (against 1.54 for the s1 grid at mu1 = 0.6061), so
@@ -62,9 +60,43 @@ const HD_SETTINGS = (;
     # alpha = 0.5 to set it independently.
     alpha = :paper,
 
-    # horizon and shocks
-    J = 39,
+    # INFINITE HORIZON. No J: the agent's problem is stationary, so V and the
+    # policies carry no age index. What remains are solver controls.
+    #
+    #   maxAge      cap on the FORWARD pass, which still runs age by age from
+    #               the birth condition because aggregates vary over the life
+    #               cycle and the government budget is a present value. The
+    #               pass stops early once the cross-section settles (tolDist)
+    #               and the discounted tail is then summed in closed form, so
+    #               maxAge is a safety net rather than the usual stopping rule.
+    #   tolV        sup-norm tolerance on the value function.
+    #   maxIterV    cap on maximizing sweeps.
+    #   howardSteps policy-evaluation sweeps between maximizations. 0 gives
+    #               plain VFI, which contracts at beta = 0.96 and so needs
+    #               ln(tol)/ln(beta) ~ 451 sweeps at tol = 1e-8 -- far more
+    #               than the 100 age sweeps of the J = 99 finite model. With
+    #               Howard the expensive maximizations number a few dozen.
+    #               Both settings must reach the same fixed point; disagreement
+    #               is a bug, and comparing them is the cheapest check there is.
+    #   tolDist     drift in (Y_j, C_j) below which the cross-section counts as
+    #               settled and the PV tail is closed analytically.
+    maxAge = 600,
 
+    # Households are born at real age age0_real, which is model age 1: real age
+    # = age0_real + model age - 1. Cross-sectional statistics are averaged over
+    # model ages stats_age_lo..stats_age_hi. Defaults match the
+    # history-independent solver exactly, so both report a 22-59 cross-section
+    # out of the box; set stats_age_lo = 1, stats_age_hi = maxAge to recover the
+    # all-ages number this solver used to report as its only statistic.
+    # age0_real = 21, stats_age_lo = 2, stats_age_hi = 39 is the same real
+    # window with birth at 21.
+
+    # Initial asset holdings at model age 1. a0 = 0.0 reproduces the original
+    # "born with nothing" condition exactly; a0_scales_with_kappa reads a0 as a
+    # multiplier on exp(kappa), matching how wages and the borrowing limit
+    # already scale with the permanent type.
+    a0 = 0.0,
+    a0_scales_with_kappa = false,
     # CALIBRATION WINDOW. Model age is the 1-based array index, so
     # real age = age0_real + model age - 1. With age0_real = 20 the window
     # model ages 3-40 is REAL AGES 22-59, which is the cross-section Kaplan
@@ -83,11 +115,12 @@ const HD_SETTINGS = (;
     age0_real = 20,
     stats_age_lo = 3,
     stats_age_hi = 40,
-    # Initial asset holdings at model age 1. a0 = 0.0 reproduces the original
-    # "born with nothing" condition exactly; a0_scales_with_kappa reads a0 as a
-    # multiplier on exp(kappa).
-    a0 = 0.0,
-    a0_scales_with_kappa = false,
+    tolV = 1e-8,
+    maxIterV = 2000,
+    howardSteps = 40,
+    tolDist = 1e-10,
+
+    # shocks
     rho = 0.958,
     sigma_omega = sqrt(0.017),
     sigma_epsilon = sqrt(0.081),
@@ -179,22 +212,11 @@ const HD_SETTINGS = (;
 )
 
 function make_history_dependent_params(; kwargs...)
-    opts = merge(NamedTuple(HD_SETTINGS), NamedTuple(kwargs))
-    # `stats_age_hi = 0` means "through the last age". Resolved here rather than
-    # as a struct default because it depends on J, itself a setting: a
-    # hard-coded number would silently mismatch whenever J moved.
-    if opts.stats_age_hi <= 0
-        opts = merge(opts, (; stats_age_hi = opts.J + 1))
-    end
-    p = HDParams(; opts...)
+    p = HDParams(; HD_SETTINGS..., kwargs...)
+    # The same two checks the history-independent solver makes in `validate`.
     1 <= p.stats_age_lo <= p.stats_age_hi ||
         error("need 1 <= stats_age_lo <= stats_age_hi, got $(p.stats_age_lo), $(p.stats_age_hi)")
-    p.stats_age_hi <= p.J + 1 ||
-        error("stats_age_hi = $(p.stats_age_hi) exceeds the last model age $(p.J + 1)")
-    for kappa in p.kappa_grid
-        a0k = p.a0_scales_with_kappa ? p.a0 * exp(kappa) : p.a0
-        first(p.a_grid) - 1e-12 <= a0k <= last(p.a_grid) + 1e-12 ||
-            error("initial assets a0 = $a0k (kappa = $kappa) fall outside a_grid")
-    end
+    p.stats_age_hi <= p.maxAge ||
+        error("stats_age_hi = $(p.stats_age_hi) exceeds the last model age maxAge = $(p.maxAge)")
     return p
 end

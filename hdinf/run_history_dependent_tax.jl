@@ -4,7 +4,7 @@ using Printf
 include("solve_history_dependent_tax.jl")   # defines module HistoryDependentTax
                                             # (loads model_settings.jl internally)
 
-using .HistoryDependentTax
+using .HistoryDependentTaxInfinite
 
 """
     run_history_dependent_tax(; kwargs...)

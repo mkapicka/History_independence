@@ -54,14 +54,25 @@ const SETTINGS = (;
     phi = 1.0,
     tau = 0.181,
 
-    # Impact-MPC windfall and the low-asset threshold, in model asset units,
-    # both on Discrete_HA's 2019 numeraire of $72,000 mean annual income
-    # (`+setup/Params.m`): $500/$72,000 = 0.0069444 and $1,000/$72,000 =
-    # 0.0138889 of mean annual labor income, times this calibration's mean
-    # labor income of 0.9112. Re-derive both after a recalibration; the summary
-    # prints each as a ratio to the realized mean so drift is visible.
-    mpc_shock = 0.0063278,
-    mpc_lowasset_threshold = 0.0126556,
+    # Asset-market access (psmodel.tex: s and h). pSS = Pr(stay saver),
+    # pHH = Pr(stay hand-to-mouth). The stationary HtM share is
+    #     piH = (1 - pSS) / (2 - pSS - pHH),
+    # printed in the options header, and the initial cross-section is drawn
+    # from it, so the HtM share is constant over the life cycle.
+    #
+    # CALIBRATED TO KAPLAN, VIOLANTE AND WEIDNER (2014), THEIR TABLE 4 -- the
+    # printed SCF 2007-2009 two-year transition matrix across poor-HtM,
+    # wealthy-HtM and non-HtM status, collapsed to two states (weighting the
+    # two HtM rows by their ergodic mass) and annualized by taking the square
+    # root of the second eigenvalue. Gives piH = 0.3166 against the 0.317 the
+    # paper reports, and an expected HtM spell of 4.15 years against their
+    # stated 3.5 (W-HtM) and 4.5 (P-HtM). Matches hiinf_htm and hdinf_htm.
+    # See references/KVW2014_WealthyHandToMouth/.
+    #
+    #     pSS = 1.00,  pHH = 0.00   -> piH = 0   reproduces `hi` exactly
+    #     pSS = 0.00,  pHH = 1.00   -> piH = 1   everyone hand-to-mouth
+    pSS = 0.8882970895,
+    pHH = 0.7589294614,
 
     # shocks
     rho = 0.958,
@@ -80,7 +91,12 @@ const SETTINGS = (;
     asset_grid_zero_share = 0.30,
     asset_grid_zero_width = 0.08,
     bbar = -0.20,
-    aMax = 15.0,
+    # Raised from 15.0 for the median-NET-WORTH target (62442/52745 = 1.1838),
+    # which puts mean assets near 2.1 times labour income -- five times the
+    # liquid-wealth target -- and left 0.32 percent of the mass on a ceiling of
+    # 15. `hi` still uses 15.0, so pass aMax explicitly to both when running the
+    # hi / hi_htm nesting check.
+    aMax = 60.0,
     asset_choice_method = :grid_search,
     asset_choice_tol = 1e-8,
     asset_choice_max_iter = 50,

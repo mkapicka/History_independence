@@ -123,13 +123,38 @@ Base.@kwdef struct CalibrationParams
     shareNegativeLiquidAssets::Float64           = 0.260   # (iii)
     asset_moment::Symbol                         = :mean   # :median or :mean
 
+    # Initial guesses for the instruments. These default to the SETTINGS values,
+    # which is where the starting point used to come from -- and the ONLY place
+    # it could come from, since qSav/qBorr/bbar are rejected in base_kwargs as
+    # calibrated instruments. Overriding them here changes the starting point
+    # without touching model_settings.jl:
+    #
+    #   calibrate_history_independent_tax(calib = CalibrationParams(bbar_init = -0.17707415))
+    #
+    # bbar_init is the one worth setting deliberately. Block (ii) is EXACTLY
+    # linear in bbar -- the true limit is -bbar * E[exp(kappa + rho*z)] and bbar
+    # enters nothing else in that moment -- so a single solve pins it down:
+    # at bbar = -0.2 the windowed ratio is 0.20895201 against a target of 0.185,
+    # giving -0.2 * 0.185/0.20895201 = -0.17707415. Measured at nZ=15, nEps=11,
+    # nKappa=5, nA=151; it moves little with the grid, and as a starting point
+    # it only needs to be close. The old default of -0.2 was 14% away.
+    # qSav_init/qBorr_init are calibrated values carried over from a previous
+    # run, not the SETTINGS defaults (0.99 / 0.97): starting the search at a
+    # near-root saves sweeps, and qSav is the instrument that costs the most
+    # solves. They were calibrated against the ALL-AGES statistic, so with the
+    # ages 3-40 window the mean asset ratio is 4.3% lower and the qSav root sits
+    # somewhat above this -- still a far better start than 0.99.
+    qSav_init::Float64  = 0.980681209802701
+    qBorr_init::Float64 = 0.9895282395052278
+    bbar_init::Float64  = -0.17707415
+
     # Instrument brackets
-    qSav_min::Float64  = 0.900
-    qSav_max::Float64  = 1.040
-    qBorr_min::Float64 = 0.700
+    qSav_min::Float64  = 0.970
+    qSav_max::Float64  = 0.997
+    qBorr_min::Float64 = 0.960
     qBorr_max::Float64 = 1.040
-    bbar_min::Float64  = -0.80
-    bbar_max::Float64  = -0.01
+    bbar_min::Float64  = -0.20
+    bbar_max::Float64  = -0.15
 
     # Inner 1-D root finder (Roots.Brent)
     inner_xtol::Float64 = 1e-5
@@ -295,10 +320,12 @@ function calibrate_history_independent_tax(;
             error("`$(k)` cannot be passed via base_kwargs; it is set by the calibration")
     end
 
-    # Instrument vector, ordered as BLOCKS indexes it.
-    x = [clamp(SETTINGS.qSav,  calib.qSav_min,  calib.qSav_max),
-         clamp(SETTINGS.qBorr, calib.qBorr_min, calib.qBorr_max),
-         clamp(SETTINGS.bbar,  calib.bbar_min,  calib.bbar_max)]
+    # Instrument vector, ordered as BLOCKS indexes it. The starting point comes
+    # from calib, not SETTINGS, so it can be set per call; the defaults keep the
+    # SETTINGS values for qSav/qBorr.
+    x = [clamp(calib.qSav_init,  calib.qSav_min,  calib.qSav_max),
+         clamp(calib.qBorr_init, calib.qBorr_min, calib.qBorr_max),
+         clamp(calib.bbar_init,  calib.bbar_min,  calib.bbar_max)]
 
     # Every moment evaluation is a full model solve, so memoize on the
     # instrument triple: Brent re-probes bracket endpoints, and the sweep-end

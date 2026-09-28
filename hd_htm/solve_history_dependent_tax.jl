@@ -66,6 +66,29 @@ export HDParams, HD_SETTINGS, make_history_dependent_params,
 
 const VINFEASIBLE = -1.0e18
 
+"""
+    access_stationary_distribution(pSS, pHH)
+
+Stationary shares `(piS, piH)` of the two-state asset-market-access chain
+
+    Pr(S'=S | S) = pSS,   Pr(H'=H | H) = pHH,
+
+which is `(1-pHH, 1-pSS) / (2 - pSS - pHH)`. The initial cross-section is drawn
+from this distribution (psmodel.tex), so the hand-to-mouth share is constant
+over the life cycle rather than drifting towards it.
+
+Three parameterizations are nested. `pSS = 1, pHH = 0` makes everyone a saver
+and reproduces `hd` exactly; `pSS = 0, pHH = 1` makes everyone hand-to-mouth;
+`pHH = 1 - pSS` makes access iid with `piH = pHH`.
+"""
+function access_stationary_distribution(pSS::Real, pHH::Real)
+    denom = 2.0 - Float64(pSS) - Float64(pHH)
+    denom > 0.0 || error("pSS = $pSS and pHH = $pHH make the access chain " *
+                         "reducible (2 - pSS - pHH = $denom); the stationary " *
+                         "distribution is not unique")
+    return ((1.0 - Float64(pHH)) / denom, (1.0 - Float64(pSS)) / denom)
+end
+
 # -----------------------------------------------------------------------------
 # Parameters
 # -----------------------------------------------------------------------------
@@ -93,6 +116,25 @@ struct HDParams
     mu1::Float64
     mu2::Float64
     pow::Float64                     # (1 - tau) * theta0
+
+    # Asset-market access. Households are in one of two exogenous states:
+    # savers (S), who choose a' freely subject to the borrowing limit, and
+    # hand-to-mouth (H), who have no access to the asset market and whose
+    # assets follow a' = a/qSav for a >= 0 and a' = a for a < 0. `pSS` and
+    # `pHH` are `s` and `h` in psmodel.tex. piS/piH are derived.
+    #
+    # THIS DIRECTORY COMBINES BOTH COMPLICATIONS. Like `hdinf_htm`, hours move
+    # the past-income stocks, so the hand-to-mouth hours choice is DYNAMIC and
+    # `solve_block_htm!` must maximize rather than look up a static payoff.
+    # Like `hi_htm`, the horizon is finite, so at the terminal age `a' >= 0` is
+    # imposed and the rollover is clamped: a' = max(htm rule, 0). A terminal
+    # hand-to-mouth debtor therefore settles up, consuming y + a rather than
+    # y + (1-qBorr)a. psmodel.tex is infinite-horizon and says nothing about
+    # that last point; it is a choice made here, matching `hi_htm`.
+    pSS::Float64                     # Pr(S' = S | S)
+    pHH::Float64                     # Pr(H' = H | H)
+    piS::Float64
+    piH::Float64
 
     # horizon and shocks
     J::Int
@@ -187,6 +229,8 @@ function HDParams(;
     alpha,
     mu1,
     mu2,
+    pSS,
+    pHH,
     J,
     age0_real,
     stats_age_lo,
@@ -257,6 +301,9 @@ function HDParams(;
     tau < 1.0 || error("tau must be less than one")
     0.0 <= mu1 < 1.0 || error("mu1 must be in [0, 1)")
     0.0 <= mu2 < 1.0 || error("mu2 must be in [0, 1)")
+    0.0 <= pSS <= 1.0 || error("pSS must satisfy 0 <= pSS <= 1")
+    0.0 <= pHH <= 1.0 || error("pHH must satisfy 0 <= pHH <= 1")
+    piS, piH = access_stationary_distribution(pSS, pHH)
     nS1 >= 1 || error("nS1 must be at least 1")
     nS2 >= 1 || error("nS2 must be at least 1")
     bbar <= 0.0 || error("Use bbar <= 0. For a borrowing limit B > 0, pass bbar = -B.")
@@ -372,6 +419,7 @@ function HDParams(;
 
     return HDParams(
         beta, eta, phi, tau, theta0, alpha, mu1, mu2, pow,
+        Float64(pSS), Float64(pHH), piS, piH,
         J, age0_real, stats_age_lo, stats_age_hi,
         Float64(a0), a0_scales_with_kappa,
         z_grid, Pz, z0_probs, eps_grid, Peps, kappa_grid, Pkappa,
@@ -685,6 +733,7 @@ mutable struct StatsAccumulator
     negative_asset_mass::Float64
     zero_asset_mass::Float64
     borrowing_constraint_mass::Float64
+    htm_mass::Float64
     upper_bound_mass::Float64
     hours_upper_bound_mass::Float64
     max_next_assets::Float64
@@ -698,7 +747,7 @@ function StatsAccumulator(nA::Int)
     return StatsAccumulator(
         zeros(nA), Float64[], Float64[], Float64[],
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         -Inf, -Inf, -Inf, -Inf,
     )
 end
@@ -719,6 +768,7 @@ function merge_stats!(dest::StatsAccumulator, src::StatsAccumulator)
     dest.negative_asset_mass += src.negative_asset_mass
     dest.zero_asset_mass += src.zero_asset_mass
     dest.borrowing_constraint_mass += src.borrowing_constraint_mass
+    dest.htm_mass += src.htm_mass
     dest.upper_bound_mass += src.upper_bound_mass
     dest.hours_upper_bound_mass += src.hours_upper_bound_mass
     dest.max_next_assets = max(dest.max_next_assets, src.max_next_assets)
@@ -758,6 +808,7 @@ function finalize_statistics(stats::StatsAccumulator, p::HDParams)
     mean_effective_borrowing_limit = safe_ratio(stats.sum_effective_borrowing_limit,
                                                 stats.borrowing_limit_mass)
     share_at_effective_borrowing_constraint = stats.borrowing_constraint_mass / total_mass
+    share_hand_to_mouth = stats.htm_mass / total_mass
     share_at_asset_upper_bound = stats.upper_bound_mass / total_mass
     share_at_hours_upper_bound = stats.hours_upper_bound_mass / total_mass
     max_next_assets = isfinite(stats.max_next_assets) ? stats.max_next_assets : NaN
@@ -796,6 +847,7 @@ function finalize_statistics(stats::StatsAccumulator, p::HDParams)
             safe_ratio(mean_effective_borrowing_limit, mean_labor_income),
         shareNegativeLiquidAssets = stats.negative_asset_mass / total_mass,
         shareAtEffectiveBorrowingConstraint = share_at_effective_borrowing_constraint,
+        shareHandToMouth = share_hand_to_mouth,
         shareZeroAssets = stats.zero_asset_mass / total_mass,
         shareAtAssetUpperBound = share_at_asset_upper_bound,
         shareAtHoursUpperBound = share_at_hours_upper_bound,
@@ -1026,11 +1078,179 @@ function solve_block!(Vcur, policyAIndex, policyH, sc::BlockScratch,
     return nothing
 end
 
+# -----------------------------------------------------------------------------
+# Hand-to-mouth block
+# -----------------------------------------------------------------------------
+
+"""
+    HTMTransition
+
+The exogenous hand-to-mouth asset rule, precomputed once per `HDParams`:
+`a' = a/qSav` for `a >= 0` and `a' = a` for `a < 0` (psmodel.tex).
+
+`a/qSav` lands between asset grid nodes by construction, so the continuation
+value and the forward transition BOTH read it through the same Young lottery
+`(left, right, weight)` stored here. Using two different placements would break
+the value-function/simulation welfare cross-check, which is the guard that this
+is implemented consistently.
+
+`cash` is `a - q(a')a'`: exactly `0` for an unclipped rollover and
+`(1-qBorr)*a < 0` for a debtor. `clipped` flags that `a/qSav` ran past the top
+grid node for some `a`, in which case `a'` is held at `aMax` and the excess is
+consumed -- the rule has no fixed point above zero, so only the grid stops it.
+
+TWO VARIANTS. `terminal = true` additionally clamps `a' >= 0`, because the last
+age imposes that on savers and a hand-to-mouth debtor would otherwise die owing
+money. A terminal debtor then settles up: `a' = 0` and `cash = a`. This mirrors
+`hi_htm`; psmodel.tex is infinite-horizon and does not cover it.
+"""
+struct HTMTransition
+    next_assets::Vector{Float64}
+    cash::Vector{Float64}
+    left::Vector{Int}
+    right::Vector{Int}
+    weight::Vector{Float64}
+    clipped::Bool
+end
+
+function htm_transition(p::HDParams; terminal::Bool = false)
+    nA = length(p.a_grid)
+    a_top = last(p.a_grid)
+    next_assets = Vector{Float64}(undef, nA)
+    cash = Vector{Float64}(undef, nA)
+    left = Vector{Int}(undef, nA)
+    right = Vector{Int}(undef, nA)
+    weight = Vector{Float64}(undef, nA)
+    clipped = false
+
+    for ia in 1:nA
+        a = p.a_grid[ia]
+        if a >= 0.0
+            ap = a / p.qSav
+            if ap > a_top
+                clipped = true
+                ap = a_top
+                cash[ia] = a - p.qSav * ap
+            else
+                # Set to zero rather than evaluating a - qSav*(a/qSav), which
+                # is the same number up to a rounding error that would leak
+                # into consumption at every positive-asset HtM state.
+                cash[ia] = 0.0
+            end
+        elseif terminal
+            ap = 0.0
+            cash[ia] = a                      # settle up: c = y + a
+        else
+            ap = a
+            cash[ia] = a - p.qBorr * ap       # (1 - qBorr) * a < 0
+        end
+        next_assets[ia] = ap
+        l, r, w = grid_lookup_weights(p.a_grid, ap)
+        left[ia] = l; right[ia] = r; weight[ia] = w
+    end
+
+    return HTMTransition(next_assets, cash, left, right, weight, clipped)
+end
+
+"""
+    solve_block_htm!(...)
+
+The hand-to-mouth counterpart of `solve_block!` for one (eps, s1, s2) block at
+one age.
+
+`a'` is exogenous, so the joint (a', h) search collapses to a scan over hours
+alone -- but it is STILL a maximization, which is what separates this directory
+and `hdinf_htm` from `hi_htm`. There, hand-to-mouth hours solve a static
+within-period problem and the payoff is precomputed once. Here hours move the
+past-income stocks through s' = mu*(log wage + log h + s), so the household
+trades current leisure against future tax liabilities exactly as a saver does,
+and the scan must be redone at every age.
+
+The continuation is TRILINEAR: bilinear in (s1', s2') as for the saver, and
+linear in a' as well, because a' = a/qSav falls between asset grid nodes. Both
+weights come from `htm`, the same object the forward pass uses.
+
+`sc.EVh` is reused as (h, a) here rather than (h, a'); the saver's block has
+finished with it by the time this runs.
+"""
+function solve_block_htm!(VcurH, policyHtmH, sc::BlockScratch, EVzH,
+                          htm::HTMTransition, ie::Int, is1::Int, is2::Int,
+                          iz::Int, age::Int, has_continuation::Bool,
+                          m_base::Float64, coeff::Float64, p::HDParams)
+    nA = length(p.a_grid)
+    nH = length(p.h_grid)
+    dis = p.h_grid_disutility
+    hpow = p.h_income_power
+    lnh = p.log_h_grid
+    beta = p.beta
+    util_weight = 1.0 - beta
+    inc = sc.inc
+    EVh = sc.EVh
+
+    @inbounds begin
+        for ih in 1:nH
+            inc[ih] = coeff * hpow[ih]
+        end
+
+        if has_continuation
+            for ih in 1:nH
+                s1n = p.mu1 * (m_base + lnh[ih] + p.s1_grid[is1])
+                s2n = p.mu2 * (m_base + lnh[ih] + p.s2_grid[is2])
+                l1, h1, w1 = grid_lookup_weights(p.s1_grid, s1n)
+                l2, h2, w2 = grid_lookup_weights(p.s2_grid, s2n)
+                w11 = (1.0 - w1) * (1.0 - w2)
+                w12 = (1.0 - w1) * w2
+                w21 = w1 * (1.0 - w2)
+                w22 = w1 * w2
+                for ia in 1:nA
+                    al = htm.left[ia]
+                    ev = w11 * EVzH[al, l1, l2] + w12 * EVzH[al, l1, h2] +
+                         w21 * EVzH[al, h1, l2] + w22 * EVzH[al, h1, h2]
+                    wa = htm.weight[ia]
+                    if wa > 0.0
+                        ar = htm.right[ia]
+                        evr = w11 * EVzH[ar, l1, l2] + w12 * EVzH[ar, l1, h2] +
+                              w21 * EVzH[ar, h1, l2] + w22 * EVzH[ar, h1, h2]
+                        ev = (1.0 - wa) * ev + wa * evr
+                    end
+                    EVh[ih, ia] = ev
+                end
+            end
+        end
+
+        # No Topkis bound here. The saver's monotonicity argument runs in `ia`
+        # through cash[iap, ia]; the hand-to-mouth household's cash is 0 at
+        # every nonnegative a and (1-qBorr)*a below, so there is no comparable
+        # ordering to exploit and the scan is over the full hours grid.
+        for ia in 1:nA
+            cash_v = htm.cash[ia]
+            best_val = VINFEASIBLE
+            best_ih = nH
+            ih0 = cash_v > 0.0 ? 1 : searchsortedfirst(inc, -cash_v)
+            for ih in ih0:nH
+                c = cash_v + inc[ih]
+                c <= 0.0 && continue
+                val = util_weight * (log(c) - dis[ih])
+                has_continuation && (val += beta * EVh[ih, ia])
+                if val > best_val
+                    best_val = val
+                    best_ih = ih
+                end
+            end
+            VcurH[ia, is1, is2, iz, ie] = best_val
+            policyHtmH[ia, is1, is2, iz, ie, age] = p.h_grid[best_ih]
+        end
+    end
+    return nothing
+end
+
 function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
                                   first_ap::Vector{Int},
                                   terminal_first_ap::Int,
                                   q_by_ap::Vector{Float64},
-                                  tax_base::Matrix{Float64}, p::HDParams)
+                                  tax_base::Matrix{Float64},
+                                  htm::HTMTransition, htm_terminal::HTMTransition,
+                                  p::HDParams)
     nA = length(p.a_grid)
     nZ = length(p.z_grid)
     nE = length(p.eps_grid)
@@ -1039,13 +1259,22 @@ function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
     nAge = p.J + 1
     nH = length(p.h_grid)
 
-    Vnext = zeros(nA, nS1, nS2, nZ, nE)     # terminal continuation V_{J+2} = 0
-    Vcur = similar(Vnext)
-    Vbar = Array{Float64}(undef, nA, nS1, nS2, nZ)   # sum over eps'
-    EVz = Array{Float64}(undef, nA, nS1, nS2)        # sum over z' given z
+    # One value function per access state. The saver's own block is untouched;
+    # it just receives the MIXED continuation in place of the plain one.
+    VnextS = zeros(nA, nS1, nS2, nZ, nE)    # terminal continuation V_{J+2} = 0
+    VcurS = similar(VnextS)
+    VnextH = zeros(nA, nS1, nS2, nZ, nE)
+    VcurH = similar(VnextH)
+    VbarS = Array{Float64}(undef, nA, nS1, nS2, nZ)  # sum over eps'
+    VbarH = Array{Float64}(undef, nA, nS1, nS2, nZ)
+    EVzS = Array{Float64}(undef, nA, nS1, nS2)       # sum over z' given z
+    EVzH = Array{Float64}(undef, nA, nS1, nS2)
+    EVmixS = Array{Float64}(undef, nA, nS1, nS2)
+    EVmixH = Array{Float64}(undef, nA, nS1, nS2)
 
     policyAIndex = Array{Int32}(undef, nA, nS1, nS2, nZ, nE, nAge)
     policyH = Array{Float64}(undef, nA, nS1, nS2, nZ, nE, nAge)
+    policyHtmH = Array{Float64}(undef, nA, nS1, nS2, nZ, nE, nAge)
 
     cash = Matrix{Float64}(undef, nA, nA)            # cash[iap, ia]
     @inbounds for ia in 1:nA, iap in 1:nA
@@ -1064,9 +1293,11 @@ function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
         has_continuation = age < nAge
 
         if has_continuation
-            fill!(Vbar, 0.0)
+            fill!(VbarS, 0.0)
+            fill!(VbarH, 0.0)
             @inbounds for ie in 1:nE
-                Vbar .+= p.Peps[ie] .* view(Vnext, :, :, :, :, ie)
+                VbarS .+= p.Peps[ie] .* view(VnextS, :, :, :, :, ie)
+                VbarH .+= p.Peps[ie] .* view(VnextH, :, :, :, :, ie)
             end
         end
 
@@ -1074,11 +1305,25 @@ function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
             ia_first = age == nAge ? terminal_first_ap : first_ap[iz]
 
             if has_continuation
-                fill!(EVz, 0.0)
+                fill!(EVzS, 0.0)
+                fill!(EVzH, 0.0)
                 @inbounds for izp in 1:nZ
                     pz = p.Pz[iz, izp]
                     pz == 0.0 && continue
-                    EVz .+= pz .* view(Vbar, :, :, :, izp)
+                    EVzS .+= pz .* view(VbarS, :, :, :, izp)
+                    EVzH .+= pz .* view(VbarH, :, :, :, izp)
+                end
+                # The access shock is independent of (z', eps'), so the mixing
+                # is done AFTER the expectation and the saver's block sees a
+                # drop-in replacement for EVz. A state with no feasible choice
+                # carries the FINITE sentinel, so these products are 0.0 when
+                # the weight is zero; with -Inf the pSS = 1 corner -- the one
+                # that has to reproduce `hd` exactly -- would be NaN.
+                @inbounds for i in eachindex(EVzS)
+                    evs = EVzS[i]
+                    evh = EVzH[i]
+                    EVmixS[i] = p.pSS * evs + (1.0 - p.pSS) * evh
+                    EVmixH[i] = p.pHH * evh + (1.0 - p.pHH) * evs
                 end
             end
 
@@ -1087,17 +1332,22 @@ function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
                 sc = scratch[Threads.threadid()]
                 m_base = kappa + p.z_grid[iz] + p.eps_grid[ie]
                 coeff = lambda * tax_base[iz, ie] * p.s_factor[is1, is2]
-                solve_block!(Vcur, policyAIndex, policyH, sc, EVz, cash,
+                solve_block!(VcurS, policyAIndex, policyH, sc, EVmixS, cash,
                              ie, is1, is2, iz, age, ia_first,
                              has_continuation, m_base, coeff, p)
+                solve_block_htm!(VcurH, policyHtmH, sc, EVmixH,
+                                 age == nAge ? htm_terminal : htm,
+                                 ie, is1, is2, iz, age, has_continuation,
+                                 m_base, coeff, p)
             end
         end
 
-        Vnext, Vcur = Vcur, Vnext
+        VnextS, VcurS = VcurS, VnextS
+        VnextH, VcurH = VcurH, VnextH
     end
 
-    welfare_value_function = expected_initial_value(Vnext, kappa, p)
-    return policyAIndex, policyH, welfare_value_function
+    welfare_value_function = expected_initial_value(VnextS, VnextH, kappa, p)
+    return policyAIndex, policyH, policyHtmH, welfare_value_function
 end
 
 """
@@ -1113,7 +1363,12 @@ function initial_asset_weights(kappa::Float64, p::HDParams)
     return grid_lookup_weights(p.a_grid, clamp(a0, first(p.a_grid), last(p.a_grid)))
 end
 
-function expected_initial_value(V0, kappa::Float64, p::HDParams)
+# Newborns draw their access state from the STATIONARY distribution (piS, piH),
+# independently of (a0, s0, z, eps), so the birth value is the piS/piH mix of
+# the two value functions at the same placement. `simulate_kappa!` seeds the
+# distribution the same way; if the two disagree, the welfare cross-check in
+# `finalize_welfare` reports it.
+function expected_initial_value(V0S, V0H, kappa::Float64, p::HDParams)
     al, ar, aw = initial_asset_weights(kappa, p)
     l1, h1, w1 = grid_lookup_weights(p.s1_grid, 0.0)
     l2, h2, w2 = grid_lookup_weights(p.s2_grid, 0.0)
@@ -1121,12 +1376,17 @@ function expected_initial_value(V0, kappa::Float64, p::HDParams)
     @inbounds for iz in eachindex(p.z_grid), ie in eachindex(p.eps_grid)
         prob = p.z0_probs[iz] * p.Peps[ie]
         prob == 0.0 && continue
-        bil(ia) = (1.0 - w1) * ((1.0 - w2) * V0[ia, l1, l2, iz, ie] +
-                                w2 * V0[ia, l1, h2, iz, ie]) +
-                  w1 * ((1.0 - w2) * V0[ia, h1, l2, iz, ie] +
-                        w2 * V0[ia, h1, h2, iz, ie])
-        v = aw > 0.0 ? (1.0 - aw) * bil(al) + aw * bil(ar) : bil(al)
-        expected_value += prob * v
+        bilS(ia) = (1.0 - w1) * ((1.0 - w2) * V0S[ia, l1, l2, iz, ie] +
+                                 w2 * V0S[ia, l1, h2, iz, ie]) +
+                   w1 * ((1.0 - w2) * V0S[ia, h1, l2, iz, ie] +
+                         w2 * V0S[ia, h1, h2, iz, ie])
+        bilH(ia) = (1.0 - w1) * ((1.0 - w2) * V0H[ia, l1, l2, iz, ie] +
+                                 w2 * V0H[ia, l1, h2, iz, ie]) +
+                   w1 * ((1.0 - w2) * V0H[ia, h1, l2, iz, ie] +
+                         w2 * V0H[ia, h1, h2, iz, ie])
+        vS = aw > 0.0 ? (1.0 - aw) * bilS(al) + aw * bilS(ar) : bilS(al)
+        vH = aw > 0.0 ? (1.0 - aw) * bilH(al) + aw * bilH(ar) : bilH(al)
+        expected_value += prob * (p.piS * vS + p.piH * vH)
     end
     return expected_value
 end
@@ -1138,7 +1398,7 @@ end
     accumulate_stats!(stats, weighted_mass, ia, a, ap, h, c, y,
                       true_borrowing_limit, effective_borrowing_limit,
                       at_borrowing_constraint, at_asset_upper, h_upper,
-                      binding_age, collect)
+                      binding_age, is_htm, collect)
 
 Add one (age, state) observation to a statistics accumulator.
 
@@ -1158,7 +1418,8 @@ averages.
                                    effective_borrowing_limit::Float64,
                                    at_borrowing_constraint::Bool,
                                    at_asset_upper::Bool, h_upper::Float64,
-                                   binding_age::Bool, collect::Bool)
+                                   binding_age::Bool, is_htm::Bool,
+                                   collect::Bool)
     @inbounds begin
         stats.asset_mass[ia] += weighted_mass
         if collect
@@ -1189,6 +1450,9 @@ averages.
         if at_borrowing_constraint
             stats.borrowing_constraint_mass += weighted_mass
         end
+        if is_htm
+            stats.htm_mass += weighted_mass
+        end
         if at_asset_upper
             stats.upper_bound_mass += weighted_mass
         end
@@ -1202,12 +1466,13 @@ end
 function simulate_kappa!(C, H, Y, A, stats::StatsAccumulator,
                          stats_all::StatsAccumulator,
                          stats_lo::StatsAccumulator,
-                         policyAIndex, policyH, kappa::Float64,
+                         policyAIndex, policyH, policyHtmH, kappa::Float64,
                          pkappa::Float64,
                          first_ap::Vector{Int}, terminal_first_ap::Int,
                          q_by_ap::Vector{Float64},
                          tax_base::Matrix{Float64},
                          wage_base::Matrix{Float64},
+                         htm::HTMTransition, htm_terminal::HTMTransition,
                          p::HDParams, lambda::Float64)
     nA = length(p.a_grid)
     nZ = length(p.z_grid)
@@ -1217,8 +1482,10 @@ function simulate_kappa!(C, H, Y, A, stats::StatsAccumulator,
     nAge = p.J + 1
     h_upper = hours_upper_bound(p)
 
-    dist = zeros(nA, nS1, nS2, nZ, nE)
-    dist_noeps = zeros(nA, nS1, nS2, nZ)
+    # Sixth axis: 1 = saver (S), 2 = hand-to-mouth (H).
+    dist = zeros(nA, nS1, nS2, nZ, nE, 2)
+    dist_noeps = zeros(nA, nS1, nS2, nZ, 2)
+    a_top = last(p.a_grid)
 
     ia0l, ia0r, ia0w = initial_asset_weights(kappa, p)
     l1, h1, w1 = grid_lookup_weights(p.s1_grid, 0.0)
@@ -1226,13 +1493,16 @@ function simulate_kappa!(C, H, Y, A, stats::StatsAccumulator,
     @inbounds for iz in 1:nZ, ie in 1:nE
         m0 = p.z0_probs[iz] * p.Peps[ie]
         m0 == 0.0 && continue
-        for (ia0, aw) in ((ia0l, 1.0 - ia0w), (ia0r, ia0w))
+        # Newborns draw the access state from the stationary distribution, so
+        # the HtM share is constant over the life cycle.
+        for (ia0, aw) in ((ia0l, 1.0 - ia0w), (ia0r, ia0w)),
+            (iacc, share) in ((1, p.piS), (2, p.piH))
             aw == 0.0 && continue
-            m0a = m0 * aw
-            dist[ia0, l1, l2, iz, ie] += m0a * (1.0 - w1) * (1.0 - w2)
-            dist[ia0, l1, h2, iz, ie] += m0a * (1.0 - w1) * w2
-            dist[ia0, h1, l2, iz, ie] += m0a * w1 * (1.0 - w2)
-            dist[ia0, h1, h2, iz, ie] += m0a * w1 * w2
+            m0a = m0 * aw * share
+            dist[ia0, l1, l2, iz, ie, iacc] += m0a * (1.0 - w1) * (1.0 - w2)
+            dist[ia0, l1, h2, iz, ie, iacc] += m0a * (1.0 - w1) * w2
+            dist[ia0, h1, l2, iz, ie, iacc] += m0a * w1 * (1.0 - w2)
+            dist[ia0, h1, h2, iz, ie, iacc] += m0a * w1 * w2
         end
     end
 
@@ -1260,18 +1530,43 @@ function simulate_kappa!(C, H, Y, A, stats::StatsAccumulator,
 
             for is2 in 1:nS2, is1 in 1:nS1
                 coeff = lambda * tax_base[iz, ie] * p.s_factor[is1, is2]
-                for ia in 1:nA
-                    mass = dist[ia, is1, is2, iz, ie]
+                for ia in 1:nA, iacc in 1:2
+                    mass = dist[ia, is1, is2, iz, ie, iacc]
                     mass <= p.massTol && continue
+                    is_htm = iacc == 2
 
                     a = p.a_grid[ia]
-                    iap = Int(policyAIndex[ia, is1, is2, iz, ie, age])
-                    ap = p.a_grid[iap]
-                    h = policyH[ia, is1, is2, iz, ie, age]
-                    c = coeff * h^p.pow + a - q_by_ap[iap] * ap
-                    c > 0.0 || error(
-                        "negative consumption on a positive-mass state " *
-                        "(age=$age, ia=$ia): widen grids or check feasibility")
+                    if is_htm
+                        # Exogenous rule, clamped to a' >= 0 at the terminal
+                        # age. The borrowing limit is not a constraint on
+                        # someone who does not choose, so at_borrowing_
+                        # constraint is false. `cash` is taken from `hm` rather
+                        # than recomputed: a - q(a')a' agrees analytically but
+                        # carries rounding noise on the positive branch, where
+                        # it must be exactly zero.
+                        hm = age == nAge ? htm_terminal : htm
+                        ap = hm.next_assets[ia]
+                        cash = hm.cash[ia]
+                        h = policyHtmH[ia, is1, is2, iz, ie, age]
+                        at_cons = false
+                        at_upper = ap >= a_top - upper_bound_level_tol(a_top)
+                        nl, nr, nw = hm.left[ia], hm.right[ia], hm.weight[ia]
+                    else
+                        iap = Int(policyAIndex[ia, is1, is2, iz, ie, age])
+                        ap = p.a_grid[iap]
+                        cash = a - q_by_ap[iap] * ap
+                        h = policyH[ia, is1, is2, iz, ie, age]
+                        at_cons = iap == lower_idx
+                        at_upper = iap == nA
+                        nl = nr = iap; nw = 0.0
+                    end
+                    c = coeff * h^p.pow + cash
+                    if !(c > 0.0)
+                        acc_label = is_htm ? "H" : "S"
+                        error("negative consumption on a positive-mass state " *
+                              "(age=$age, ia=$ia, access=$acc_label): " *
+                              "widen grids or check feasibility")
+                    end
                     y = wage_base[iz, ie] * h
                     u = log(c) - p.phi * h^(1.0 + p.eta) / (1.0 + p.eta)
                     welfare_simulation += utility_weight * mass * u
@@ -1289,18 +1584,18 @@ function simulate_kappa!(C, H, Y, A, stats::StatsAccumulator,
                     # divides by, so the gate wraps the whole call.
                     accumulate_stats!(stats_all, weighted_mass, ia, a, ap, h, c, y,
                                       true_borrowing_limit, effective_borrowing_limit,
-                                      iap == lower_idx, iap == nA, h_upper,
-                                      binding_age, false)
+                                      at_cons, at_upper, h_upper,
+                                      binding_age, is_htm, false)
                     in_stats_window &&
                         accumulate_stats!(stats, weighted_mass, ia, a, ap, h, c, y,
                                           true_borrowing_limit, effective_borrowing_limit,
-                                          iap == lower_idx, iap == nA, h_upper,
-                                          binding_age, p.collect_distributions)
+                                          at_cons, at_upper, h_upper,
+                                          binding_age, is_htm, p.collect_distributions)
                     at_stats_age_lo &&
                         accumulate_stats!(stats_lo, weighted_mass, ia, a, ap, h, c, y,
                                           true_borrowing_limit, effective_borrowing_limit,
-                                          iap == lower_idx, iap == nA, h_upper,
-                                          binding_age, false)
+                                          at_cons, at_upper, h_upper,
+                                          binding_age, is_htm, false)
 
                     if age < nAge
                         s1n = p.mu1 * (m_base + log(h) + p.s1_grid[is1])
@@ -1315,14 +1610,32 @@ function simulate_kappa!(C, H, Y, A, stats::StatsAccumulator,
                         v12 = (1.0 - cw1) * cw2
                         v21 = cw1 * (1.0 - cw2)
                         v22 = cw1 * cw2
+                        # The access chain is independent of (z', eps'), of a'
+                        # and of the s-stocks, so the (a', s', z') mass is built
+                        # exactly as in `hd` and then split across the two
+                        # access states. A saver lands on one asset node
+                        # (nw = 0, second leg skipped); a hand-to-mouth
+                        # household on the two its Young lottery straddles.
+                        stay_w = is_htm ? p.pHH : p.pSS
+                        switch_w = 1.0 - stay_w
+                        iacc_sw = 3 - iacc
                         for izp in 1:nZ
                             pz = p.Pz[iz, izp]
                             pz == 0.0 && continue
                             base = mass * pz
-                            dist_noeps[iap, c1l, c2l, izp] += base * v11
-                            dist_noeps[iap, c1l, c2h, izp] += base * v12
-                            dist_noeps[iap, c1h, c2l, izp] += base * v21
-                            dist_noeps[iap, c1h, c2h, izp] += base * v22
+                            for (iapn, aw) in ((nl, 1.0 - nw), (nr, nw))
+                                aw == 0.0 && continue
+                                basea = base * aw
+                                for (iaccp, accw) in ((iacc, stay_w),
+                                                      (iacc_sw, switch_w))
+                                    accw == 0.0 && continue
+                                    b = basea * accw
+                                    dist_noeps[iapn, c1l, c2l, izp, iaccp] += b * v11
+                                    dist_noeps[iapn, c1l, c2h, izp, iaccp] += b * v12
+                                    dist_noeps[iapn, c1h, c2l, izp, iaccp] += b * v21
+                                    dist_noeps[iapn, c1h, c2h, izp, iaccp] += b * v22
+                                end
+                            end
                         end
                     end
                 end
@@ -1331,7 +1644,7 @@ function simulate_kappa!(C, H, Y, A, stats::StatsAccumulator,
 
         if age < nAge
             for iep in 1:nE
-                view(dist, :, :, :, :, iep) .= p.Peps[iep] .* dist_noeps
+                view(dist, :, :, :, :, iep, :) .= p.Peps[iep] .* dist_noeps
             end
         end
     end
@@ -1365,12 +1678,16 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HDParams)
 
     q_by_ap = asset_prices(p)
     terminal_first_ap = first_nonnegative_asset_index(p)
+    # kappa-independent, so built once and shared read-only across the threads.
+    htm = htm_transition(p)
+    htm_terminal = htm_transition(p; terminal = true)
 
     # Phase 1: policies. kappa runs SERIALLY because solve_policies_for_kappa
     # is itself threaded over the nEps*nS1*nS2 blocks, which offers far more
     # parallelism than the nKappa (typically 3) values ever could.
     policyA_by_kappa = Vector{Array{Int32,6}}(undef, nKappa)
     policyH_by_kappa = Vector{Array{Float64,6}}(undef, nKappa)
+    policyHtmH_by_kappa = Vector{Array{Float64,6}}(undef, nKappa)
     first_ap_by_kappa = Vector{Vector{Int}}(undef, nKappa)
     tax_base_by_kappa = Vector{Matrix{Float64}}(undef, nKappa)
     wage_base_by_kappa = Vector{Matrix{Float64}}(undef, nKappa)
@@ -1379,11 +1696,12 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HDParams)
         first_ap_by_kappa[ik] = first_feasible_asset_indices(kappa, p)
         tax_base_by_kappa[ik], wage_base_by_kappa[ik] =
             precompute_income_bases(kappa, p)
-        policyA_by_kappa[ik], policyH_by_kappa[ik],
+        policyA_by_kappa[ik], policyH_by_kappa[ik], policyHtmH_by_kappa[ik],
         welfare_value_function_by_kappa[ik] =
             solve_policies_for_kappa(lambda, kappa, first_ap_by_kappa[ik],
                                      terminal_first_ap, q_by_ap,
-                                     tax_base_by_kappa[ik], p)
+                                     tax_base_by_kappa[ik],
+                                     htm, htm_terminal, p)
     end
 
     # Phase 2: the forward distribution, which is independent across kappa.
@@ -1394,10 +1712,11 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HDParams)
         welfare_simulation, clamped = simulate_kappa!(
             C_by_kappa[ik], H_by_kappa[ik], Y_by_kappa[ik], A_by_kappa[ik],
             stats_local, stats_all_local, stats_lo_local,
-            policyA_by_kappa[ik], policyH_by_kappa[ik],
+            policyA_by_kappa[ik], policyH_by_kappa[ik], policyHtmH_by_kappa[ik],
             p.kappa_grid[ik], p.Pkappa[ik],
             first_ap_by_kappa[ik], terminal_first_ap, q_by_ap,
-            tax_base_by_kappa[ik], wage_base_by_kappa[ik], p, lambda,
+            tax_base_by_kappa[ik], wage_base_by_kappa[ik],
+            htm, htm_terminal, p, lambda,
         )
         stats_by_kappa[ik] = stats_local
         stats_all_by_kappa[ik] = stats_all_local
@@ -1643,6 +1962,9 @@ function print_hd_equilibrium_summary(eq, p::HDParams;
     @printf("qBorr                      = %s\n", p.qBorr)
     @printf("bbar                       = %s\n", p.bbar)
     @printf("theta0 (implied)           = %.8f\n", p.theta0)
+    @printf("pSS / pHH                  = %.8f / %.8f   (piH = %.8f)%s\n",
+            p.pSS, p.pHH, p.piH,
+            p.piH == 0.0 ? "   [NO HtM: this is the hd model]" : "")
     @printf("s' clamped mass share      = %.3e\n", eq.sClampedMassShare)
     if hasproperty(eq, :elapsedSeconds)
         @printf("solve time                 = %.3f seconds\n", eq.elapsedSeconds)
@@ -1680,6 +2002,11 @@ function print_aggregate_statistics(s, p::HDParams; label::AbstractString = "")
             s.shareNegativeLiquidAssets)
     @printf("share at effective grid borrowing bound  = %.8f\n",
             s.shareAtEffectiveBorrowingConstraint)
+    # Realized mass in the H state, against the stationary piH the initial
+    # cross-section was drawn from. The two agree at every age; a gap means the
+    # forward pass lost access mass, which nothing else here would reveal.
+    @printf("share hand-to-mouth (target %.6f)    = %.8f\n",
+            p.piH, s.shareHandToMouth)
     @printf("share with zero assets                   = %.8f\n", s.shareZeroAssets)
     @printf("share at upper asset bound               = %.8f\n", s.shareAtAssetUpperBound)
     @printf("share at hours upper bound               = %.8f\n", s.shareAtHoursUpperBound)

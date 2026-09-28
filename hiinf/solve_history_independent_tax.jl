@@ -7,6 +7,28 @@ using Roots
 using StatsBase
 
 """
+    VINFEASIBLE
+
+Value assigned to a state with no feasible choice. FINITE on purpose.
+
+The finite-horizon solver uses `-Inf` here, which is harmless when the value
+function is only ever swept backwards. Under value-function iteration it is not:
+with `-Inf` the comparison `val > best_val` is `-Inf > -Inf`, which is false, so
+no choice is ever selected and the maximizer silently returns its
+initialization -- `best_iap = ia_first`, the LOOSEST borrowing limit at that z.
+The forward pass then puts mass on an asset the next low-z draw cannot service,
+and consumption goes negative.
+
+A finite sentinel makes every comparison well defined, so an infeasible state
+takes the least-bad option instead of an arbitrary index, and `-1e18` dominates
+any attainable utility so such states are never chosen when anything else is
+available. This is the same device `hd` uses (there to avoid `0 * Inf = NaN` in
+the s-interpolation), which is why the infinite-horizon hd solver never hit
+this.
+"""
+const VINFEASIBLE = -1.0e18
+
+"""
     HIParams(; kwargs...)
 
 Parameters for the finite-horizon Bewley model with the history-independent
@@ -48,59 +70,61 @@ when supplying a complete parameter set explicitly. Fields whose default is an
 expression are derived from the fields above them.
 """
 Base.@kwdef struct HIParams
-    # Size of the unanticipated one-time windfall used for the impact MPC, and
-    # the asset threshold below which a second, conditional MPC is reported.
-    # Both are in model asset units and both follow Discrete_HA's 2019
-    # numeraire (`+setup/Params.m`: `numeraire_in_dollars = 72000`,
-    # `shocks_dollars = [-1, -500, -5000, 1, 500, 5000]`,
-    # `dollar_thresholds = [1000, ...]`):
-    #
-    #     $500  / $72,000 = 0.0069444 of mean annual labor income
-    #     $1,000 / $72,000 = 0.0138889
-    #
-    # times this calibration's mean labor income of 0.9112. They are ABSOLUTE
-    # numbers, not fractions, because a fraction of mean income could only be
-    # resolved after the forward pass that needs it; the summary prints the
-    # realized ratios so drift away from $500 and $1,000 is visible rather than
-    # assumed. RECALIBRATE and these two move -- re-derive them from the new
-    # mean labor income rather than leaving them.
-    mpc_shock::Float64
-    mpc_lowasset_threshold::Float64
-
     # Preferences and tax.
     beta::Float64
     eta::Float64
     phi::Float64
     tau::Float64
 
-    # Ages j = 0,...,J are stored in length-(J+1) vectors at index j+1.
-    J::Int
-
-    # MODEL AGE is the 1-based array index, so model age 1 is j = 0, the first
-    # simulated period, at real age `age0_real`; real age = age0_real + j.
-    #
-    # Cross-sectional statistics are averaged over model ages stats_age_lo to
-    # stats_age_hi INCLUSIVE rather than over the whole life. The calibration
-    # target is Kaplan-Violante (2014) Table 2, built on a 2001 SCF
-    # cross-section of households aged 22-59, so with age0_real = 22 that
-    # window is model ages 1-38. `stats_age_hi = 0` in SETTINGS is resolved to
-    # J+1 by `hi_params`, which covers every age and is the pre-window
-    # behaviour; the equilibrium reports BOTH the window and the all-ages
-    # version, so the effect of restricting it is visible rather than implied.
-    age0_real::Int
-    stats_age_lo::Int
-    stats_age_hi::Int
-
-    # Initial asset holdings at model age 1 (j = 0). a0 = 0.0 is the original
-    # condition -- everyone born with nothing -- and remains the default, so
-    # results are unchanged unless it is set. a0_scales_with_kappa multiplies
-    # a0 by exp(kappa), matching how wages and the borrowing limit
+    # INFINITE HORIZON: no J. The agent's problem is stationary in (a, z, eps),
+    # so V and the policies carry no age index -- that is the whole difference
+    # from the hi solver. `maxAge` sets the length of the FORWARD pass, which
+    # still runs age by age from the birth condition because aggregates vary
+    # over the life cycle and the government budget is a present value over
+    # them. Every kappa runs all maxAge ages; the PV tail past maxAge is closed
+    # in the form, and `tolDist` only reports whether the path had settled by
+    # then (see the convergedAge diagnostic).
+    maxAge::Int                      # length of the forward pass
+    tolV::Float64                    # sup-norm tolerance on the value function
+    maxIterV::Int                    # cap on maximizing sweeps
+    howardSteps::Int                 # policy-evaluation sweeps between maximizations
+    tolDist::Float64                 # drift below this => report path settled
+    # The WARNING threshold, relative to Y. tolDist is an absolute bound on a
+    # sum of two aggregate differences, which is uninterpretable without the
+    # scale: a drift of 1.5e-09 against Y = 0.927 fails an absolute 1e-10 test
+    # while being nine orders below the quantity it measures, and lambda and W
+    # were shown invariant to 15 digits across a doubled maxAge in exactly that
+    # case. A genuinely unsettled path (maxAge = 40) instead sits at 1e-04 to
+    # 1e-03 of Y, so a relative threshold separates the two cleanly. Set to Inf
+    # to silence the warning entirely; tolDist still drives convergedAge.
+    tolDriftRel::Float64             # warn when drift/|Y[end]| exceeds this
+    # Initial asset holdings at model age 0. a0 = 0.0 is the original condition
+    # (everyone born with nothing) and remains the default, so results are
+    # unchanged unless it is set. a0_scales_with_kappa multiplies a0 by
+    # exp(kappa), matching how wages and the borrowing limit
     # (-bbar*exp(kappa + rho*z)) already scale with the permanent type: a flat
     # a0 would otherwise leave the lowest-kappa household starting relatively
-    # far richer. a0 is placed on the grid by the same Young lottery used for
-    # a', not snapped to the nearest node, so it stays exact between points.
-    a0::Float64
-    a0_scales_with_kappa::Bool
+    # far richer than the highest. a0 is placed on the grid by the same Young
+    # lottery used for a', not snapped to the nearest node, so it stays exact
+    # between grid points.
+    a0::Float64                      # initial assets (level, or scale if below)
+    a0_scales_with_kappa::Bool       # use a0 * exp(kappa) instead of a0
+    # MODEL AGE is the 1-based period index: model age 1 is the first simulated
+    # period, at real age `age0_real`. Real age = age0_real + model age - 1.
+    # The model is born AT age0_real, so nothing before it is simulated.
+    #
+    # Cross-sectional statistics are averaged over model ages stats_age_lo to
+    # stats_age_hi inclusive, not over the whole forward pass. The calibration
+    # target is Kaplan-Violante (2014) Table 2: mean net liquid wealth over mean
+    # earnings-plus-benefits, 31,001/52,745 = 0.588, computed on a 2001 SCF
+    # cross-section of households aged 22-59 with the top 5% by net worth
+    # dropped. With age0_real = 22 that window is model ages 1-38.
+    # Averaging over all maxAge ages instead made the statistic depend on
+    # maxAge (0.32034 at 600 against 0.32141 at 1200) and mixed in ages the
+    # data moment excludes.
+    age0_real::Int                   # real age at model age 1 (birth)
+    stats_age_lo::Int                # first MODEL age in the statistics window
+    stats_age_hi::Int                # last  MODEL age in the statistics window
 
     # Shocks. The *_mean defaults normalize each shock to exp-mean one.
     rho::Float64
@@ -210,13 +234,6 @@ function hi_params(; kwargs...)
         opts = Base.structdiff(opts, (; h_grid = nothing))
     end
 
-    # `stats_age_hi = 0` means "through the last age". Resolved here rather
-    # than as a struct default because it depends on J, which is itself a
-    # setting: a hard-coded number would silently mismatch whenever J moved.
-    if !haskey(opts, :stats_age_hi) || opts.stats_age_hi <= 0
-        opts = merge(opts, (; stats_age_hi = opts.J + 1))
-    end
-
     return validate(HIParams(; opts...))
 end
 
@@ -227,9 +244,29 @@ Check the parameter combinations that the individual grid builders cannot see.
 Returns `p` so it can wrap a construction.
 """
 function validate(p::HIParams)
-    # The original requirement was that a_grid contain 0.0 exactly, because
-    # the initial holding was hard-coded to zero. What actually matters is that
-    # it lies inside the grid and is feasible for every type.
+    0.0 <= p.beta < 1.0 || error("beta must satisfy 0 <= beta < 1")
+    p.tau < 1.0 || error("tau must be less than one for h^(1-tau)")
+    p.labor_solver in (:brent, :hybrid_newton, :grid) ||
+        error("labor_solver must be :brent, :hybrid_newton, or :grid")
+    p.asset_choice_method in (:grid_search, :interpolate) ||
+        error("asset_choice_method must be :grid_search or :interpolate")
+    p.asset_choice_tol > 0.0 || error("asset_choice_tol must be positive")
+    p.maxAge >= 2 || error("maxAge must be at least 2")
+    p.tolV > 0.0 || error("tolV must be positive")
+    p.maxIterV >= 1 || error("maxIterV must be at least 1")
+    p.howardSteps >= 0 || error("howardSteps must be nonnegative (0 = plain VFI)")
+    p.tolDist > 0.0 || error("tolDist must be positive")
+    p.tolDriftRel > 0.0 || error("tolDriftRel must be positive (Inf silences the warning)")
+    1 <= p.stats_age_lo <= p.stats_age_hi ||
+        error("need 1 <= stats_age_lo <= stats_age_hi, got $(p.stats_age_lo), $(p.stats_age_hi)")
+    p.stats_age_hi <= p.maxAge ||
+        error("stats_age_hi = $(p.stats_age_hi) exceeds the last model age " *
+              "$(p.maxAge); widen maxAge or narrow the statistics window")
+    p.asset_choice_max_iter > 0 || error("asset_choice_max_iter must be positive")
+    p.printEveryLambda >= 0 || error("printEveryLambda must be nonnegative")
+    # The original requirement was that a_grid contain 0.0 exactly, because the
+    # initial condition was hard-coded to zero. What actually matters is that
+    # the initial holding lies inside the grid and is feasible for every type.
     if p.a0 == 0.0 && !p.a0_scales_with_kappa
         any(iszero, p.a_grid) ||
             error("a_grid must include 0.0 exactly when a0 = 0")
@@ -240,28 +277,15 @@ function validate(p::HIParams)
             error("initial assets a0 = $a0k (kappa = $kappa) fall outside " *
                   "a_grid [$(first(p.a_grid)), $(last(p.a_grid))]")
         for z in p.z_grid
+            # bbar is NEGATIVE, so this IS the lower bound on assets; the
+            # positive -bbar*exp(.) reported as trueBorrowingLimit is its
+            # magnitude, not the bound.
             limit = p.bbar * exp(kappa + p.rho * z)
             a0k >= limit - 1e-12 ||
                 error("initial assets a0 = $a0k (kappa = $kappa, z = $z) are " *
                       "below the borrowing limit $limit")
         end
     end
-    1 <= p.stats_age_lo <= p.stats_age_hi ||
-        error("need 1 <= stats_age_lo <= stats_age_hi, got $(p.stats_age_lo), $(p.stats_age_hi)")
-    p.stats_age_hi <= p.J + 1 ||
-        error("stats_age_hi = $(p.stats_age_hi) exceeds the last model age " *
-              "$(p.J + 1); widen J or narrow the statistics window")
-    0.0 <= p.beta < 1.0 || error("beta must satisfy 0 <= beta < 1")
-    p.tau < 1.0 || error("tau must be less than one for h^(1-tau)")
-    p.labor_solver in (:brent, :hybrid_newton, :grid) ||
-        error("labor_solver must be :brent, :hybrid_newton, or :grid")
-    p.asset_choice_method in (:grid_search, :interpolate) ||
-        error("asset_choice_method must be :grid_search or :interpolate")
-    p.asset_choice_tol > 0.0 || error("asset_choice_tol must be positive")
-    p.asset_choice_max_iter > 0 || error("asset_choice_max_iter must be positive")
-    p.printEveryLambda >= 0 || error("printEveryLambda must be nonnegative")
-    any(iszero, p.a_grid) ||
-        error("a_grid must include 0.0 exactly for the initial condition")
     maximum(p.a_grid) <= p.aMax + 1e-12 || error("a_grid has points above aMax")
     length(p.z0_probs) == length(p.z_grid) || error("z0_probs length must match z_grid")
     length(p.Peps) == length(p.eps_grid) || error("Peps length must match eps_grid")
@@ -288,27 +312,6 @@ Base.@kwdef mutable struct HIStatsAccumulator
     hours_upper_bound_mass::Float64 = 0.0
     max_material_next_assets::Float64 = -Inf
     max_material_hours::Float64 = -Inf
-    # Mass-weighted sum of the impact MPC, and the mass whose perturbed state
-    # a + mpc_shock left the top of the asset grid and was extrapolated. The
-    # second is a diagnostic: the extrapolation continues the last segment's
-    # slope, which is a guess, so a non-negligible share means aMax is too low
-    # for the windfall.
-    sum_mpc::Float64 = 0.0
-    mpc_extrapolated_mass::Float64 = 0.0
-    # The distribution of MPCs, not just its mean, following the measures
-    # Discrete_HA's MPCFinder reports beside `avg`: the mean over responders
-    # (`mpc_condl`), the responder shares (`mpc_pos`, `mpc_neg`, `mpc0`), and
-    # the MPC of the low-liquid-wealth group (`mpc_htm_a_lt_1000`).
-    sum_mpc_positive::Float64 = 0.0
-    mpc_positive_mass::Float64 = 0.0
-    mpc_negative_mass::Float64 = 0.0
-    mpc_zero_mass::Float64 = 0.0
-    sum_mpc_lowasset::Float64 = 0.0
-    lowasset_mass::Float64 = 0.0
-    # Per-observation MPCs, pushed in lockstep with `distribution_weights` and
-    # therefore only when collect_distributions is on. The median needs the
-    # whole distribution; the means above do not.
-    mpc_values::Vector{Float64} = Float64[]
 end
 
 function HIStatsAccumulator(nA::Int)
@@ -318,14 +321,12 @@ end
 
 # How each field combines when per-kappa accumulators are reduced.
 const STATS_APPEND_FIELDS =
-    (:distribution_weights, :hours_values, :consumption_values, :mpc_values)
+    (:distribution_weights, :hours_values, :consumption_values)
 const STATS_SUM_FIELDS =
     (:total_mass, :sum_current_assets, :sum_labor_income, :sum_borrowing_limit,
      :sum_effective_borrowing_limit, :borrowing_limit_mass, :negative_asset_mass,
      :zero_asset_mass, :borrowing_constraint_mass, :upper_bound_mass,
-     :hours_upper_bound_mass, :sum_mpc, :mpc_extrapolated_mass,
-     :sum_mpc_positive, :mpc_positive_mass, :mpc_negative_mass,
-     :mpc_zero_mass, :sum_mpc_lowasset, :lowasset_mass)
+     :hours_upper_bound_mass)
 const STATS_MAX_FIELDS = (:max_material_next_assets, :max_material_hours)
 
 function merge_stats!(dest::HIStatsAccumulator, src::HIStatsAccumulator)
@@ -357,7 +358,7 @@ function solve_history_independent_tax(p::HIParams)
     start_time = time()
 
     if p.verbose
-        println("\n=== History-independent tax finite-horizon solver ===")
+        println("\n=== History-independent tax infinite-horizon solver ===")
         print_solver_options(p)
         flush(stdout)
     end
@@ -479,7 +480,14 @@ end
 
 function print_solver_options(p::HIParams)
     println("Options:")
-    @printf("  age dimension J             = %d\n", p.J)
+    @printf("  horizon                     = infinite (VFI fixed point)\n")
+    @printf("  maxAge (forward pass length)= %d\n", p.maxAge)
+    @printf("  statistics window (model age)= %d-%d (real age %d-%d)\n",
+            p.stats_age_lo, p.stats_age_hi,
+            p.age0_real + p.stats_age_lo - 1, p.age0_real + p.stats_age_hi - 1)
+    @printf("  tolV, maxIterV, howardSteps = %.1e, %d, %d\n",
+            p.tolV, p.maxIterV, p.howardSteps)
+    @printf("  tolDist (settling report)   = %.1e\n", p.tolDist)
     @printf("  shock grid dimension nZ     = %d\n", length(p.z_grid))
     @printf("  shock grid dimension nEps   = %d\n", length(p.eps_grid))
     @printf("  shock grid dimension nKappa = %d\n", length(p.kappa_grid))
@@ -545,7 +553,10 @@ function print_equilibrium_summary(eq, p::HIParams;
     @printf("PV consumption             = %.8f\n", eq.consumptionPV)
     @printf("mean output                = %.8f\n", mean(eq.Y))
     @printf("mean consumption           = %.8f\n", mean(eq.C))
-    @printf("terminal assets            = %.8f\n", eq.A[end])
+    # There is no terminal age here, so A[end] is the SETTLED level the profile
+    # is carried forward at, not a terminal condition. Before the profiles were
+    # padded this printed 0.0 -- the untouched tail of `zeros(maxAge)`.
+    @printf("settled assets             = %.8f\n", eq.A[end])
     # Printed with every digit (shortest representation that round-trips to
     # the same Float64), so calibrated values can be copied back verbatim.
     @printf("qSav                       = %s\n", p.qSav)
@@ -557,17 +568,18 @@ function print_equilibrium_summary(eq, p::HIParams;
 
     if show_statistics && hasproperty(eq, :statistics)
         print_aggregate_statistics(eq.statistics, p;
-            label = @sprintf("model ages %d-%d, real %d-%d  [CALIBRATION WINDOW]",
+            label = @sprintf("ages %d-%d, real %d-%d  [CALIBRATION WINDOW]",
                              p.stats_age_lo, p.stats_age_hi,
                              p.age0_real + p.stats_age_lo - 1,
                              p.age0_real + p.stats_age_hi - 1))
-        # The same statistics over the whole life. Nothing is calibrated on
-        # these; they are printed so the effect of restricting the moments to
-        # the working-age window is visible rather than implied.
+        # The same statistics over the whole forward pass. Nothing is
+        # calibrated on these; they are printed so the effect of restricting
+        # the moments to the working-age window is visible rather than implied.
         if hasproperty(eq, :statisticsAllAges)
             print_aggregate_statistics(eq.statisticsAllAges, p;
-                label = @sprintf("model ages 1-%d, real %d-%d  [ALL AGES]",
-                                 p.J + 1, p.age0_real, p.age0_real + p.J))
+                label = @sprintf("ages 1-%d, real %d-%d  [ALL AGES]",
+                                 p.maxAge, p.age0_real,
+                                 p.age0_real + p.maxAge - 1))
         end
     end
     if show_welfare && hasproperty(eq, :welfare)
@@ -599,32 +611,8 @@ function print_aggregate_statistics(s, p::HIParams; label::AbstractString = "")
     @printf("share with zero assets                   = %.8f\n", s.shareZeroAssets)
     @printf("share at upper asset bound               = %.8f\n", s.shareAtAssetUpperBound)
     @printf("share at hours upper bound               = %.8f\n", s.shareAtHoursUpperBound)
-    # Kaplan-Violante (2022) eq. (2) averaged over the ages this block covers.
-    # The shock is printed beside it, absolutely and against this block's own
-    # mean labor income, because the MPC is only interpretable with the windfall
-    # size attached -- the consumption function is concave, so a larger windfall
-    # buys a smaller MPC.
-    if hasproperty(s, :meanMPC)
-        @printf("average impact MPC                       = %.8f\n", s.meanMPC)
-        @printf("  windfall                               = %.8f  (%.6f of mean labor income)\n",
-                s.mpcShock, s.mpcShockToMeanLaborIncome)
-        @printf("  mean MPC | responders (mpc > 0)        = %.8f\n",
-                s.meanMPCConditionalOnPositive)
-        @printf("  share mpc > 0 / mpc < 0 / mpc = 0      = %.6f / %.6f / %.6f\n",
-                s.shareMPCPositive, s.shareMPCNegative, s.shareMPCZero)
-        if isfinite(s.medianMPC)
-            @printf("  median MPC                             = %.8f\n", s.medianMPC)
-        end
-        @printf("  mean MPC | a < %.6f (%.6f of Y)  = %.8f  over share %.6f\n",
-                s.mpcLowAssetThreshold, s.mpcLowAssetThresholdToMeanLaborIncome,
-                s.meanMPCAtLowAssets, s.shareAtLowAssets)
-        if s.shareMPCExtrapolated > 1e-8
-            @printf("  share extrapolated above the grid      = %.8f   [raise aMax]\n",
-                    s.shareMPCExtrapolated)
-        end
-    end
-    # Only the windowed statistics carry the entry-age block; the all-ages
-    # block is printed through this same function and has no such age.
+    # Only the windowed statistics carry the entry-age block; `stats_all` is
+    # printed through this same function and has no such age.
     if hasproperty(s, :meanAssetsAtStatsAgeLoToMeanLaborIncome)
         lo_real = p.age0_real + p.stats_age_lo - 1
         @printf("mean assets at age %-2d / mean labor income = %.8f\n",
@@ -656,12 +644,62 @@ end
 function attach_elapsed(eq, start_time::Float64, p::HIParams; converged::Bool)
     elapsed = time() - start_time
     eq_out = merge(eq, (; converged = converged, elapsedSeconds = elapsed))
+    warn_if_unsettled(eq_out, p; converged = converged)
     if p.verbose
         print_upper_bound_warning(eq_out.statistics)
         @printf("total solve time          = %.3f seconds\n", elapsed)
         flush(stdout)
     end
     return eq_out
+end
+
+"""
+    warn_if_unsettled(eq, p)
+
+Report the cross-section drift of the RETURNED equilibrium, once.
+
+The closed-form PV tail assumes Y_j - C_j has stopped moving past `maxAge`.
+Checking that inside the per-lambda solve produced one warning per probe, and
+the root-finder visits corners (lambda = lambdaMin, qSav near its bracket) where
+the economy is degenerate and legitimately unsettled -- true but useless. Only
+the equilibrium actually returned has to be clean, so the test lives here, on
+the single funnel every return path passes through.
+
+The drift is reported RELATIVE to Y: an absolute bound on a sum of aggregate
+differences is uninterpretable without its scale. A converged solve was measured
+at 1.7e-09 of Y with lambda and W invariant to 15 digits across a doubled
+maxAge; a genuinely unsettled path runs 1e-04 and worse. `tolDriftRel` sits
+between them, and `Inf` silences this entirely.
+"""
+function warn_if_unsettled(eq, p::HIParams; converged::Bool = true)
+    # A solve whose lambda never converged is not an equilibrium, so its
+    # settling behaviour is not informative -- and the lambda failure is already
+    # reported by the solver. Stacking a second warning on top buries the one
+    # that matters. Observed: a calibration probe at qSav = 0.911 (floor 0.900)
+    # where no lambda balances the budget, bottoming out at lambda = 0.018
+    # against an equilibrium ~1.01, warned twice for one underlying problem.
+    converged || return nothing
+    hasproperty(eq, :diagnostics) || return nothing
+    d = eq.diagnostics.finalDrift
+    yscale = abs(eq.Y[end]) > 0 ? abs(eq.Y[end]) : 1.0
+    any(x -> !(x / yscale <= p.tolDriftRel), d) || return nothing
+    lines = join((@sprintf("kappa %d (% .4f): drift %.3e (%.1e of Y)  convergedAge %s",
+                           ik, p.kappa_grid[ik], d[ik], d[ik] / yscale,
+                           eq.diagnostics.convergedAgeByKappa[ik] == 0 ? "never" :
+                           string(eq.diagnostics.convergedAgeByKappa[ik]))
+                  for ik in eachindex(d)), "\n")
+    @warn("RETURNED equilibrium: cross-section drift at maxAge exceeds tolDriftRel " *
+          "for at least one kappa; the closed-form PV tail assumes the path has " *
+          "settled.\n" *
+          @sprintf("maxAge = %d, tolDriftRel = %.1e, Y[end] = %.6f\n",
+                   p.maxAge, p.tolDriftRel, eq.Y[end]) *
+          @sprintf("qSav = %.8f, qBorr = %.8f, bbar = %.8f, lambda = %.8f\n",
+                   p.qSav, p.qBorr, p.bbar, eq.lambda) * lines *
+          "\nThis is a CONVERGED equilibrium being returned, not a lambda probe. " *
+          "During a calibration it is still one instrument triple among many; " *
+          "check qSav/qBorr/bbar above against the calibrated values. " *
+          "Judge by the relative column; raise maxAge if it is not many orders below Y.")
+    return nothing
 end
 
 function print_upper_bound_warning(s)
@@ -682,14 +720,27 @@ function print_upper_bound_warning(s)
 end
 
 function government_residual_at_lambda(lambda::Float64, p::HIParams)
-    aggs, stats, stats_all, welfare, solutions = solve_aggregates_for_lambda(lambda, p)
-    nAge = p.J + 1
+    aggs, stats, stats_all, welfare, solutions, diag =
+        solve_aggregates_for_lambda(lambda, p)
+
+    # The budget is STILL a present value over ages: the agent is infinitely
+    # lived, but the cohort's aggregates vary over its life, so this is not the
+    # stationary condition a steady-state Bewley model would use.
+    #
+    # The path is iterated to maxAge for every kappa, after which Y_j - C_j is
+    # constant and the remaining terms sum in closed form:
+    #   sum_{j>Jc} qGov^j (Y-C)_inf = (Y-C)_inf * qGov^(Jc+1) / (1 - qGov).
+    # Jc is maxAge now. It used to be maximum(settled_by_kappa), which made the
+    # loop below read the band where kappas had dropped out one at a time and
+    # the aggregates were partial sums.
+    Jc = diag.settledAge
     lhs = 0.0
-    for j in 1:nAge
+    for j in 1:Jc
         lhs += p.qGov^(j - 1) * (aggs.Y[j] - aggs.C[j])
     end
+    lhs += (aggs.Y[Jc] - aggs.C[Jc]) * p.qGov^Jc / (1.0 - p.qGov)
     lhs *= (1.0 - p.qGov)
-    rhs = (1.0 - p.qGov^nAge) * p.G
+    rhs = p.G                       # (1 - qGov^inf) * G = G
     residual = lhs - rhs
 
     eq = (;
@@ -701,14 +752,15 @@ function government_residual_at_lambda(lambda::Float64, p::HIParams)
         H = aggs.H,
         Y = aggs.Y,
         A = aggs.A,
-        consumptionPV = discounted_sum(aggs.C, p.qGov),
-        outputPV = discounted_sum(aggs.Y, p.qGov),
+        consumptionPV = discounted_sum_with_tail(aggs.C, p.qGov),
+        outputPV = discounted_sum_with_tail(aggs.Y, p.qGov),
         statistics = stats,
-        # Same quantities over every age instead of the calibration
+        # Same quantities over ages 1..maxAge instead of the calibration
         # window. Reported for comparison; nothing is calibrated on it.
         statisticsAllAges = stats_all,
         welfare = welfare,
         solutions = solutions,
+        diagnostics = diag,
         parameters = p,
     )
     return residual, eq
@@ -722,14 +774,14 @@ function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
     nA = length(p.a_grid)
     nZ = length(p.z_grid)
     nE = length(p.eps_grid)
-    nAge = p.J + 1
-
+    # No age dimension on the policies: this is the memory difference from the
+    # finite-horizon solver, and the reason the stationary problem is cheaper.
     Vnext = zeros(nA, nZ, nE)
     Vcur = similar(Vnext)
     EV = zeros(nA, nZ)
-    policyAIndex = Array{Int32}(undef, nA, nZ, nE, nAge)
-    policyA = Array{Float64}(undef, nA, nZ, nE, nAge)
-    policyH = Array{Float64}(undef, nA, nZ, nE, nAge)
+    policyAIndex = Array{Int32}(undef, nA, nZ, nE)
+    policyA = Array{Float64}(undef, nA, nZ, nE)
+    policyH = Array{Float64}(undef, nA, nZ, nE)
 
     flow_u, flow_h = p.asset_choice_method == :grid_search ?
                      precompute_flow_payoffs(lambda, first_ap, q_by_ap, tax_base, p) :
@@ -738,26 +790,96 @@ function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
     beta = p.beta
     util_weight = 1.0 - beta
 
-    for age in nAge:-1:1
+    # One application of the Bellman operator. `maximize = true` re-optimizes
+    # and rewrites the policy; `false` applies the stored one (Howard).
+    function sweep!(maximize::Bool)
         compute_expected_value!(EV, Vnext, p)
-
         if p.asset_choice_method == :grid_search
-            solve_policy_age_grid_search!(
-                Vcur, policyAIndex, policyA, policyH, flow_u, flow_h, EV,
-                age, first_ap, terminal_first_ap, p, util_weight, beta,
-            )
+            if maximize
+                solve_policy_age_grid_search!(
+                    Vcur, policyAIndex, policyA, policyH, flow_u, flow_h, EV,
+                    first_ap, p, util_weight, beta,
+                )
+            else
+                evaluate_policy_grid_search!(
+                    Vcur, policyAIndex, flow_u, EV, p, util_weight, beta,
+                )
+            end
         else
+            # The interpolated branch has no cheap evaluation step (the flow
+            # payoff is not precomputed), so it always maximizes; howardSteps
+            # is ignored there and plain VFI is what runs.
             solve_policy_age_interpolated!(
-                Vcur, policyAIndex, policyA, policyH, EV, age, lambda, kappa,
+                Vcur, policyAIndex, policyA, policyH, EV, lambda, kappa,
                 tax_base, p, util_weight, beta,
             )
         end
-
-        Vnext, Vcur = Vcur, Vnext
+        return nothing
     end
 
+    # Swapping outside the closure keeps Vnext/Vcur unboxed: assigning to a
+    # captured variable inside would make every access type-unstable.
+    howard = p.asset_choice_method == :grid_search ? p.howardSteps : 0
+    iters = 0
+    gap = Inf
+    for _ in 1:p.maxIterV
+        sweep!(true)
+        # Measure the sup norm over FINITE entries only, before swapping.
+        # States with no feasible a' carry -Inf in both sweeps, and
+        # -Inf - (-Inf) = NaN would poison the comparison: `gap <= tolV` is
+        # then false forever and the iteration silently runs to maxIterV with
+        # an unconverged policy. Those states never change and carry no mass,
+        # so excluding them is the right measure, not a workaround.
+        gap = 0.0
+        @inbounds for i in eachindex(Vcur)
+            (isfinite(Vcur[i]) && isfinite(Vnext[i])) || continue
+            d = abs(Vcur[i] - Vnext[i])
+            d > gap && (gap = d)
+        end
+        Vnext, Vcur = Vcur, Vnext
+        iters += 1
+        gap <= p.tolV && break
+        for _ in 1:howard
+            sweep!(false)
+            Vnext, Vcur = Vcur, Vnext
+        end
+    end
+    gap <= p.tolV ||
+        @warn "value function did not converge" kappa iters gap tolV = p.tolV
+
     welfare_value_function = expected_initial_value(Vnext, kappa, p)
-    return policyAIndex, policyA, policyH, welfare_value_function
+    return policyAIndex, policyA, policyH, welfare_value_function, iters, gap
+end
+
+"""
+    evaluate_policy_grid_search!(Vcur, policyAIndex, flow_u, EV, p, util_weight, beta)
+
+Policy evaluation: apply the stored asset choice without searching over it.
+This is the cheap half of Howard's method -- one lookup per state instead of a
+scan over `ia_first:nA` -- so it costs roughly 1/nA of a maximizing sweep.
+
+Only the grid-search branch has this, because it is the branch whose flow
+payoff `flow_u` is precomputed; reconstructing the payoff would cost as much as
+re-optimizing and defeat the purpose.
+"""
+function evaluate_policy_grid_search!(Vcur, policyAIndex, flow_u, EV,
+                                      p::HIParams, util_weight::Float64,
+                                      beta::Float64)
+    nA = length(p.a_grid)
+    nZ = length(p.z_grid)
+    nE = length(p.eps_grid)
+    @inbounds for ia in 1:nA, iz in 1:nZ, ie in 1:nE
+        iap = Int(policyAIndex[ia, iz, ie])
+        u = flow_u[iap, ia, iz, ie]
+        # A state with no feasible choice carries the `ia_first` fallback
+        # policy, whose flow payoff is -Inf. Writing that into V would undo the
+        # finite sentinel: the next maximizing sweep would see EV = -Inf, fail
+        # every comparison, and fall back again -- so the state must keep the
+        # same finite value the maximizer gave it.
+        Vcur[ia, iz, ie] = isfinite(u) ?
+            util_weight * u + beta * EV[iap, iz] : VINFEASIBLE
+    end
+    return nothing
 end
 
 """
@@ -767,7 +889,7 @@ Grid placement of the initial asset holding for a household of type `kappa`, as
 `(left, right, right_weight)` from the same Young lottery used for a'.
 
 Both the birth value function and the simulated initial distribution must go
-through THIS function. If they disagree the value-function/simulation
+through THIS function. If they disagree, the value-function/simulation
 cross-check in `finalize_welfare` breaks -- which is exactly the guard wanted,
 since the two are otherwise independent computations of the same object.
 """
@@ -787,9 +909,8 @@ function expected_initial_value(V0, kappa::Float64, p::HIParams)
 end
 
 function solve_policy_age_grid_search!(Vcur, policyAIndex, policyA, policyH,
-                                       flow_u, flow_h, EV, age::Int,
-                                       first_ap::Vector{Int},
-                                       terminal_first_ap::Int, p::HIParams,
+                                       flow_u, flow_h, EV,
+                                       first_ap::Vector{Int}, p::HIParams,
                                        util_weight::Float64, beta::Float64)
     nA = length(p.a_grid)
     nZ = length(p.z_grid)
@@ -797,9 +918,9 @@ function solve_policy_age_grid_search!(Vcur, policyAIndex, policyA, policyH,
 
     @inbounds for ia in 1:nA
         for iz in 1:nZ
-            ia_first = age == p.J + 1 ? terminal_first_ap : first_ap[iz]
+            ia_first = first_ap[iz]
             for ie in 1:nE
-                best_val = -Inf
+                best_val = VINFEASIBLE
                 best_iap = ia_first
                 best_h = p.hMin
 
@@ -816,9 +937,9 @@ function solve_policy_age_grid_search!(Vcur, policyAIndex, policyA, policyH,
                 end
 
                 Vcur[ia, iz, ie] = best_val
-                policyAIndex[ia, iz, ie, age] = Int32(best_iap)
-                policyA[ia, iz, ie, age] = p.a_grid[best_iap]
-                policyH[ia, iz, ie, age] = best_h
+                policyAIndex[ia, iz, ie] = Int32(best_iap)
+                policyA[ia, iz, ie] = p.a_grid[best_iap]
+                policyH[ia, iz, ie] = best_h
             end
         end
     end
@@ -826,7 +947,7 @@ function solve_policy_age_grid_search!(Vcur, policyAIndex, policyA, policyH,
 end
 
 function solve_policy_age_interpolated!(Vcur, policyAIndex, policyA, policyH,
-                                        EV, age::Int, lambda::Float64,
+                                        EV, lambda::Float64,
                                         kappa::Float64,
                                         tax_base::Matrix{Float64}, p::HIParams,
                                         util_weight::Float64, beta::Float64)
@@ -837,16 +958,20 @@ function solve_policy_age_interpolated!(Vcur, policyAIndex, policyA, policyH,
     @inbounds for ia in 1:nA
         a = p.a_grid[ia]
         for iz in 1:nZ
-            lower = asset_choice_lower_bound(age, kappa, iz, p)
+            lower = asset_choice_lower_bound(kappa, iz, p)
             for ie in 1:nE
                 income_coeff = lambda * tax_base[iz, ie]
                 best_val, best_ap, best_iap, best_h = interpolated_asset_choice(
                     a, lower, income_coeff, EV, iz, p, util_weight, beta,
                 )
-                Vcur[ia, iz, ie] = best_val
-                policyAIndex[ia, iz, ie, age] = Int32(best_iap)
-                policyA[ia, iz, ie, age] = best_ap
-                policyH[ia, iz, ie, age] = best_h
+                # Same reason as the grid-search branch: keep the value finite
+                # so the next sweep's comparisons stay well defined. Here the
+                # search seeds `best_val` from an evaluation rather than a
+                # constant, so the guard sits at the assignment.
+                Vcur[ia, iz, ie] = isfinite(best_val) ? best_val : VINFEASIBLE
+                policyAIndex[ia, iz, ie] = Int32(best_iap)
+                policyA[ia, iz, ie] = best_ap
+                policyH[ia, iz, ie] = best_h
             end
         end
     end
@@ -1033,21 +1158,20 @@ end
     accumulate_stats!(stats, weighted_mass, ia, a, ap, h, c, y,
                       true_borrowing_limit, effective_borrowing_limit,
                       at_borrowing_constraint, at_asset_upper, h_upper,
-                      binding_age, collect, p)
+                      collect::Bool, p)
 
 Add one (age, state) observation to a statistics accumulator.
 
-Factored out of the forward pass so that several accumulators over different
-age coverages are fed from ONE body and cannot drift apart. `collect` is passed
-rather than read from `p` so an accumulator can skip the distribution vectors:
-those are a cross-sectional object, and pushing three Float64 per (age, state)
-for every age is the allocation that matters at large grids.
+Factored out because the forward pass now feeds TWO accumulators -- one over the
+calibration age window and one over every age -- and a copied block would let
+the two definitions drift. `collect` is passed rather than read from `p` so the
+all-ages accumulator can skip the distribution vectors: those are a
+cross-sectional object, the cross-section is the window, and pushing three
+Float64 per (age, state) across all `maxAge` ages is the allocation that
+OOM-killed the 128 GiB cluster jobs.
 
-`binding_age` is the finite-horizon wrinkle the infinite-horizon solver does not
-have: at the terminal age `a' >= 0` replaces the borrowing limit, so that age
-contributes no mass to the limit averages.
-
-Marked `@inline`: this is the innermost loop of the forward pass.
+Marked `@inline`: this is the innermost loop of the forward pass, called once
+per accumulator per positive-mass state per age.
 """
 @inline function accumulate_stats!(stats::HIStatsAccumulator, weighted_mass::Float64,
                                    ia::Int, a::Float64, ap::Float64, h::Float64,
@@ -1056,24 +1180,23 @@ Marked `@inline`: this is the innermost loop of the forward pass.
                                    effective_borrowing_limit::Float64,
                                    at_borrowing_constraint::Bool,
                                    at_asset_upper::Bool, h_upper::Float64,
-                                   binding_age::Bool, mpc::Float64,
-                                   mpc_extrapolated::Bool, collect::Bool, p::HIParams)
+                                   collect::Bool, p::HIParams)
     @inbounds begin
         stats.asset_mass[ia] += weighted_mass
         if collect
             push!(stats.distribution_weights, weighted_mass)
             push!(stats.hours_values, h)
             push!(stats.consumption_values, c)
-            push!(stats.mpc_values, mpc)
         end
         stats.total_mass += weighted_mass
         stats.sum_current_assets += weighted_mass * a
         stats.sum_labor_income += weighted_mass * y
         stats.sum_borrowing_limit += weighted_mass * true_borrowing_limit
         stats.sum_effective_borrowing_limit += weighted_mass * effective_borrowing_limit
-        if binding_age
-            stats.borrowing_limit_mass += weighted_mass
-        end
+        # Every age has a borrowing limit here, so all mass counts towards the
+        # limit averages; the finite solver excludes its terminal age, where
+        # a' >= 0 replaces the limit.
+        stats.borrowing_limit_mass += weighted_mass
         if weighted_mass > upper_bound_share_tol()
             stats.max_material_next_assets = max(stats.max_material_next_assets, ap)
             stats.max_material_hours = max(stats.max_material_hours, h)
@@ -1093,138 +1216,6 @@ Marked `@inline`: this is the innermost loop of the forward pass.
         if h >= h_upper - upper_bound_level_tol(h_upper)
             stats.hours_upper_bound_mass += weighted_mass
         end
-        stats.sum_mpc += weighted_mass * mpc
-        if mpc_extrapolated
-            stats.mpc_extrapolated_mass += weighted_mass
-        end
-        # Exact zero rather than a tolerance, matching `mpcs(:)==0` in
-        # MPCFinder.m: an exact zero here means a flat segment of the
-        # interpolated consumption function, which is a real feature of a
-        # grid-search policy and not floating-point noise.
-        if mpc > 0.0
-            stats.sum_mpc_positive += weighted_mass * mpc
-            stats.mpc_positive_mass += weighted_mass
-        elseif mpc < 0.0
-            stats.mpc_negative_mass += weighted_mass
-        else
-            stats.mpc_zero_mass += weighted_mass
-        end
-        if a < p.mpc_lowasset_threshold
-            stats.sum_mpc_lowasset += weighted_mass * mpc
-            stats.lowasset_mass += weighted_mass
-        end
-    end
-    return nothing
-end
-
-# =============================================================================
-# THE IMPACT MPC
-# =============================================================================
-# Kaplan and Violante (2022, Annu. Rev. Econ.), their equation (2): for a
-# household whose state is (b, y) when an unanticipated one-time windfall of
-# size x arrives,
-#
-#     m_0(x; b, y) = [ c(b + x, y) - c(b, y) ] / x,
-#
-# and the average (their Online Appendix, equation D.7) integrates that function
-# under the distribution,
-#
-#     mbar_0(x) = int m_0(x; b, y) dmu(b, y).
-#
-# Here the windfall lands on current assets, which is the model's cash-on-hand
-# margin: m_0 = [c(a + x, z, eps, j) - c(a, z, eps, j)] / x, averaged with the
-# forward-pass mass. Two coverages are reported, which is the one departure from
-# KV asked for: ages j = 0,...,J (`statisticsAllAges`) and the calibration
-# window stats_age_lo,...,stats_age_hi (`statistics`). KV have no age dimension
-# to choose between -- their baseline is infinite-horizon and mu is stationary.
-#
-# TWO THINGS THE LEVEL IS NOT COMPARABLE TO. First, KV report a QUARTERLY MPC
-# out of $500; this model is annual, so this is an annual MPC out of an annual
-# windfall and will be larger for the same household. Second, hours are
-# endogenous here and exogenous in KV's baseline, so c(a + x) embeds a labor
-# supply response: the windfall relaxes the budget, hours fall, and the
-# consumption response is net of that. The FORMULA is theirs exactly; the
-# consumption function it is applied to is this model's.
-#
-# c(a + x) is read off the consumption policy by linear interpolation in a,
-# which is what the Kaplan-lineage codes do (`coninterp_mpc` in Discrete_HA).
-#
-# ACCURACY, MEASURED. At the terminal age a' = 0 binds, so the problem is static
-# and c(a) has a closed form: h solves A(1-tau) = c phi h^(eta+tau) with
-# A = lambda*tax_base. Against the EXACT ARC [c(a+x) - c(a)]/x built from that
-# root, the reported MPC converges in the asset grid at better than first order
-# (:interpolate, J=39, nZ=nEps=5, nKappa=3): worst cell 2.04e-2, 9.02e-3,
-# 3.78e-3, 1.46e-3 at nA = 51, 101, 201, 401, mean error 4.55e-3 to 3.03e-4.
-# Benchmark it against the DERIVATIVE instead and a 2.2% floor appears that no
-# refinement removes -- that gap is real convexity of c over the windfall, not
-# error, since dc/da = (eta+tau)/(phi h^(1+eta) + eta+tau) RISES with a as hours
-# fall. KV's object is the arc, which is why they report MPCs per shock size.
-#
-# GRID RESOLUTION MATTERS MORE THAN THE METHOD, but both converge. The average
-# MPC under :grid_search exceeds :interpolate by 5.41% at nA = 101 and 1.91% at
-# nA = 201, then agrees to -0.48% at nA = 401 (0.28542 against 0.28681): a'(a)
-# is a step function under grid search and c inherits a sawtooth, which biases
-# the MPC UP at coarse grids rather than permanently. At the production nA = 151
-# expect :grid_search to overstate by roughly 3%; raise nA or switch to
-# :interpolate when the MPC is the object of interest. The summary reports which
-# method produced the number.
-@inline function interpolate_consumption(con::AbstractVector{Float64},
-                                        a_target::Float64, p::HIParams)
-    grid = p.a_grid
-    nA = length(grid)
-    # OFF-GRID, FOLLOWING `extend_interp` IN Discrete_HA's solve_EGP.m.
-    # Above the top node MATLAB's `griddedInterpolant(..., 'linear')` continues
-    # the last segment's slope, so that is what happens here: CLAMPING instead
-    # would report slope 0 and drive the MPC of those cells to zero, which is
-    # the wrong sign of error for a household rich enough to leave the grid.
-    # The flag is still returned, because extrapolating is a statement about
-    # aMax being too low for the windfall, not a result.
-    if a_target >= grid[nA]
-        slope = (con[nA] - con[nA-1]) / (grid[nA] - grid[nA-1])
-        return con[nA] + slope * (a_target - grid[nA]), true
-    elseif a_target <= grid[1]
-        # Their rule below the grid: consume the whole shortfall, slope 1.
-        # Unreachable for a positive windfall, since a_grid[1] is the borrowing
-        # limit; kept so a negative `mpc_shock` behaves as it does in their code.
-        return con[1] + (a_target - grid[1]), false
-    end
-    # The grid is sorted, so one searchsorted is enough; `i` is the first index
-    # at or above the target, so the bracket is (i-1, i) with i >= 2.
-    i = searchsortedfirst(grid, a_target)
-    i <= 1 && return con[1], false
-    lo, hi = grid[i-1], grid[i]
-    w = (a_target - lo) / (hi - lo)
-    return (1.0 - w) * con[i-1] + w * con[i], false
-end
-
-# Consumption on the whole asset grid at one age, which is what the MPC needs:
-# the perturbed state a + x sits at a different asset index, so the policy must
-# be available away from the cell being visited. Filled once per age into a
-# reused buffer rather than carried for every age at once.
-function fill_consumption_policy!(con::Array{Float64,3}, age::Int,
-                                  policyAIndex, policyA, policyH,
-                                  q_by_ap::Vector{Float64},
-                                  tax_base::Matrix{Float64},
-                                  p::HIParams, lambda::Float64)
-    nA = length(p.a_grid)
-    nZ = length(p.z_grid)
-    nE = length(p.eps_grid)
-    on_grid = p.asset_choice_method == :grid_search
-    @inbounds for ia in 1:nA
-        a = p.a_grid[ia]
-        for iz in 1:nZ, ie in 1:nE
-            if on_grid
-                iap = Int(policyAIndex[ia, iz, ie, age])
-                ap = p.a_grid[iap]
-                q_ap = q_by_ap[iap]
-            else
-                ap = policyA[ia, iz, ie, age]
-                q_ap = asset_price(ap, p)
-            end
-            h = policyH[ia, iz, ie, age]
-            con[ia, iz, ie] =
-                lambda * tax_base[iz, ie] * h^(1.0 - p.tau) + a - q_ap * ap
-        end
     end
     return nothing
 end
@@ -1240,16 +1231,18 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
     nA = length(p.a_grid)
     nZ = length(p.z_grid)
     nE = length(p.eps_grid)
-    nAge = p.J + 1
+    nAge = p.maxAge
     dist = zeros(nA, nZ, nE)
     dist_next = similar(dist)
     ia0_left, ia0_right, ia0_w = initial_asset_weights(kappa, p)
     h_upper = hours_upper_bound(p)
-    welfare_simulation = 0.0
-    # Consumption over the whole asset grid at the age being visited, refilled
-    # once per age; the MPC reads c(a + mpc_shock) off it.
-    con_age = Array{Float64}(undef, nA, nZ, nE)
-    mpc_shock = p.mpc_shock
+    # Flow utility per age, so the discounted sum can be closed analytically
+    # past the settled age. Accumulating the discounted total directly would
+    # silently truncate: stopping at age Jc drops a tail worth beta^Jc of
+    # lifetime utility, 2.2e-3 at Jc = 150.
+    u_by_age = zeros(nAge)
+    converged_age = 0           # diagnostic only; 0 means never settled by nAge
+    final_drift = NaN           # drift at the last age, reported not tested
 
     @inbounds for iz in 1:nZ, ie in 1:nE
         prob = p.z0_probs[iz] * p.Peps[ie]
@@ -1258,12 +1251,19 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
     end
 
     @inbounds for age in 1:nAge
-        in_stats_window = p.stats_age_lo <= age <= p.stats_age_hi
-        at_stats_age_lo = age == p.stats_age_lo
         fill!(dist_next, 0.0)
-        utility_weight = (1.0 - p.beta) * p.beta^(age - 1)
-        fill_consumption_policy!(con_age, age, policyAIndex, policyA, policyH,
-                                 q_by_ap, tax_base, p, lambda)
+        # MODEL AGE now equals the array index: index 1 is model age 1, the
+        # first simulated period, at real age age0_real. The aggregates
+        # C/H/Y/A and u_by_age are NOT gated -- the government budget and the
+        # welfare integral need the whole path, and only the cross-sectional
+        # statistics are meant to mimic a data cross-section.
+        in_stats_window = p.stats_age_lo <= age <= p.stats_age_hi
+        # A third window, one age wide: the cross-section AS IT ENTERS the
+        # calibration window. With age0_real = 18 and stats_age_lo = 5 that is
+        # real age 22, where households hold four years of accumulation rather
+        # than the a0 = 0 they are born with -- which is exactly the quantity
+        # the statistics window can no longer show.
+        at_stats_age_lo = age == p.stats_age_lo
 
         for ia in 1:nA
             a = p.a_grid[ia]
@@ -1274,10 +1274,10 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                 end
 
                 if p.asset_choice_method == :grid_search
-                    iap = Int(policyAIndex[ia, iz, ie, age])
+                    iap = Int(policyAIndex[ia, iz, ie])
                     ap = p.a_grid[iap]
                     q_ap = q_by_ap[iap]
-                    lower_idx = age == nAge ? terminal_first_ap : first_ap[iz]
+                    lower_idx = first_ap[iz]
                     lower_ap = p.a_grid[lower_idx]
                     at_borrowing_constraint = iap == lower_idx
                     at_asset_upper = iap == nA
@@ -1285,38 +1285,37 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                     next_right = iap
                     next_right_weight = 0.0
                 else
-                    ap = policyA[ia, iz, ie, age]
+                    ap = policyA[ia, iz, ie]
                     q_ap = asset_price(ap, p)
-                    lower_ap = asset_choice_lower_bound(age, kappa, iz, p)
+                    lower_ap = asset_choice_lower_bound(kappa, iz, p)
                     at_borrowing_constraint =
                         abs(ap - lower_ap) <= asset_choice_bound_tol(lower_ap, p)
                     at_asset_upper =
                         ap >= asset_upper_bound(p) - asset_choice_bound_tol(asset_upper_bound(p), p)
                     next_left, next_right, next_right_weight = asset_transition_weights(ap, p)
                 end
-                h = policyH[ia, iz, ie, age]
+                h = policyH[ia, iz, ie]
+                # A state with no feasible a' keeps the `best_h = hMin`
+                # fallback and an infinite value; if the distribution ever
+                # reaches one, consumption is non-positive and `log(c)` throws a
+                # bare DomainError with no context. Report the state instead.
+                h > 0.0 || error(
+                    "infeasible policy on a positive-mass state " *
+                    "(age=$age, ia=$ia, iz=$iz, ie=$ie, a=$a, h=$h): " *
+                    "no feasible next-period asset was found when solving")
                 c = lambda * tax_base[iz, ie] * h^(1.0 - p.tau) + a - q_ap * ap
+                c > 0.0 || error(
+                    "non-positive consumption on a positive-mass state " *
+                    "(age=$age, ia=$ia, iz=$iz, ie=$ie, a=$a, ap=$ap, h=$h, c=$c)")
                 y = wage_base[iz, ie] * h
                 u = log(c) - p.phi * h^(1.0 + p.eta) / (1.0 + p.eta)
-                # A borrowing limit only exists before the terminal age, where
-                # a' >= 0 is imposed instead. Its mass is accumulated separately
-                # so the reported means average over ages j = 0,...,J-1 only.
-                binding_age = age < nAge
-                true_borrowing_limit = binding_age ?
-                                       -p.bbar * exp(kappa + p.rho * p.z_grid[iz]) : 0.0
-                effective_borrowing_limit = binding_age ? -lower_ap : 0.0
-                welfare_simulation += utility_weight * mass * u
-
-                # The impact MPC at this cell. c(a) is recomputed from the
-                # policy buffer rather than reusing `c` above so that both legs
-                # of the difference come from the SAME interpolant: mixing the
-                # exact c(a) with an interpolated c(a + x) would put the
-                # interpolation error straight into the numerator.
-                c_here, _ = interpolate_consumption(view(con_age, :, iz, ie),
-                                                    a, p)
-                c_up, mpc_extrapolated = interpolate_consumption(
-                    view(con_age, :, iz, ie), a + mpc_shock, p)
-                mpc = (c_up - c_here) / mpc_shock
+                # Infinite horizon: the borrowing limit binds at every age, so
+                # all mass counts towards the reported means -- the finite
+                # solver has to exclude its terminal age, where a' >= 0 stands
+                # in for the limit.
+                true_borrowing_limit = -p.bbar * exp(kappa + p.rho * p.z_grid[iz])
+                effective_borrowing_limit = -lower_ap
+                u_by_age[age] += mass * u
 
                 weighted_mass = pkappa * mass
                 C[age] += weighted_mass * c
@@ -1324,30 +1323,29 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                 Y[age] += weighted_mass * y
                 A[age] += weighted_mass * ap
 
-                # Three age coverages from one body: `stats` is the
-                # calibration window, `stats_all` every age, and `stats_lo` the
-                # single age at which the window opens -- the cross-section AS
-                # IT ENTERS the window, which the window itself cannot show.
-                # Each keeps its own total_mass, the denominator every share
-                # and mean divides by, which is why the gate wraps the whole
-                # call rather than parts of it.
+                # Two accumulators, two age windows. `stats` covers the
+                # calibration window [stats_age_lo, stats_age_hi] and is what
+                # the moments are matched on; `stats_all` covers every age of
+                # the forward pass. Both are fed from the same helper so they
+                # cannot drift apart, and each keeps its own total_mass -- the
+                # denominator every share and mean divides by, which is why the
+                # window has to gate the whole block rather than parts of it.
                 accumulate_stats!(stats_all, weighted_mass, ia, a, ap, h, c, y,
                                   true_borrowing_limit, effective_borrowing_limit,
                                   at_borrowing_constraint, at_asset_upper,
-                                  h_upper, binding_age, mpc, mpc_extrapolated, false, p)
+                                  h_upper, false, p)
                 in_stats_window &&
                     accumulate_stats!(stats, weighted_mass, ia, a, ap, h, c, y,
                                       true_borrowing_limit, effective_borrowing_limit,
                                       at_borrowing_constraint, at_asset_upper,
-                                      h_upper, binding_age, mpc, mpc_extrapolated,
-                                      p.collect_distributions, p)
+                                      h_upper, p.collect_distributions, p)
                 at_stats_age_lo &&
                     accumulate_stats!(stats_lo, weighted_mass, ia, a, ap, h, c, y,
                                       true_borrowing_limit, effective_borrowing_limit,
                                       at_borrowing_constraint, at_asset_upper,
-                                      h_upper, binding_age, mpc, mpc_extrapolated, false, p)
+                                      h_upper, false, p)
 
-                if age < nAge
+                begin
                     for izp in 1:nZ
                         zprob = p.Pz[iz, izp]
                         if zprob == 0.0
@@ -1368,12 +1366,52 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
         end
 
         dist, dist_next = dist_next, dist
+
+        # Record where the cross-section settles, but DO NOT stop here. An
+        # earlier version broke out of the loop at this point, which was a
+        # speed optimization that corrupted everything downstream of the
+        # profiles:
+        #
+        #   * C/H/Y/A keep their `zeros(maxAge)` initialization past the break,
+        #     so the age profiles fell off a cliff to exactly 0.0 -- array
+        #     initialization presented as model output;
+        #   * each kappa settles at its own age and the aggregates are summed
+        #     ACROSS kappa, so ages between the earliest and latest settled age
+        #     held partial sums over only the kappas still running. The
+        #     government budget read exactly that band, since it sums to Jc;
+        #   * `discounted_sum` walks the whole maxAge-long array, so
+        #     consumptionPV and outputPV were summing that zero tail;
+        #   * worst, the `stats` accumulator also stopped, so each kappa
+        #     contributed settled_age ages of mass and meanAssets came out
+        #     weighted by settled age rather than by Pkappa. total_mass would
+        #     be an integer if every kappa ran the same number of ages; it came
+        #     out at 417.166667, which is the tell.
+        #
+        # Running every kappa the full maxAge fixes all four at once and costs
+        # only the ages past settlement in the forward pass, which is small
+        # next to the VFI. `converged_age` is kept purely as a diagnostic, so
+        # an undersized maxAge is visible rather than silent.
+        if age > 1
+            drift = abs(Y[age] - Y[age-1]) + abs(C[age] - C[age-1])
+            converged_age == 0 && drift <= p.tolDist && (converged_age = age)
+            age == nAge && (final_drift = drift)
+        end
     end
-    return welfare_simulation
+
+    # Discounted lifetime utility. The path now runs to maxAge, so the closed
+    # form covers only ages beyond it: flow utility is constant at
+    # u_by_age[nAge] from there on, giving u_inf * beta^nAge.
+    welfare_simulation = 0.0
+    for age in 1:nAge
+        welfare_simulation += (1.0 - p.beta) * p.beta^(age - 1) * u_by_age[age]
+    end
+    welfare_simulation += p.beta^nAge * u_by_age[nAge]
+
+    return welfare_simulation, converged_age, final_drift
 end
 
 function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
-    nAge = p.J + 1
+    nAge = p.maxAge
     nKappa = length(p.kappa_grid)
     C = zeros(nAge)
     H = zeros(nAge)
@@ -1391,15 +1429,19 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
     stats_all_by_kappa = Vector{HIStatsAccumulator}(undef, nKappa)
     stats_lo_by_kappa = Vector{HIStatsAccumulator}(undef, nKappa)
     saved_policyAIndex = p.store_solutions ?
-                         Vector{Array{Int32,4}}(undef, nKappa) : Array{Int32,4}[]
+                         Vector{Array{Int32,3}}(undef, nKappa) : Array{Int32,3}[]
     saved_policyA = p.store_solutions ?
-                    Vector{Array{Float64,4}}(undef, nKappa) : Array{Float64,4}[]
+                    Vector{Array{Float64,3}}(undef, nKappa) : Array{Float64,3}[]
     saved_policyH = p.store_solutions ?
-                    Vector{Array{Float64,4}}(undef, nKappa) : Array{Float64,4}[]
+                    Vector{Array{Float64,3}}(undef, nKappa) : Array{Float64,3}[]
     q_by_ap = asset_prices(p)
     terminal_first_ap = first_nonnegative_asset_index(p)
     welfare_value_function_by_kappa = Vector{Float64}(undef, length(p.kappa_grid))
     welfare_simulation_by_kappa = similar(welfare_value_function_by_kappa)
+    vIters_by_kappa = zeros(Int, nKappa)
+    vGap_by_kappa = fill(NaN, nKappa)
+    converged_by_kappa = zeros(Int, nKappa)
+    drift_by_kappa = fill(NaN, nKappa)
 
     # Each kappa owns local arrays and a local stats accumulator; the reduction
     # after this loop avoids races on aggregate sums and distribution vectors.
@@ -1408,7 +1450,8 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
         pkappa = p.Pkappa[ik]
         first_ap = first_feasible_asset_indices(kappa, p)
         tax_base, wage_base = precompute_income_bases(kappa, p)
-        policyAIndex, policyA, policyH, welfare_value_function = solve_policies_for_kappa(
+        policyAIndex, policyA, policyH, welfare_value_function, vIters, vGap =
+            solve_policies_for_kappa(
             lambda, kappa, first_ap, terminal_first_ap, q_by_ap, tax_base, p,
         )
         C_local = C_by_kappa[ik]
@@ -1418,9 +1461,9 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
         stats_local = HIStatsAccumulator(length(p.a_grid))
         stats_all_local = HIStatsAccumulator(length(p.a_grid))
         stats_lo_local = HIStatsAccumulator(length(p.a_grid))
-        welfare_simulation = simulate_kappa!(
-            C_local, H_local, Y_local, A_local, stats_local,
-            stats_all_local, stats_lo_local,
+        welfare_simulation, converged, final_drift = simulate_kappa!(
+            C_local, H_local, Y_local, A_local, stats_local, stats_all_local,
+            stats_lo_local,
             policyAIndex, policyA, policyH,
             kappa, pkappa, first_ap, terminal_first_ap, q_by_ap,
             tax_base, wage_base, p, lambda,
@@ -1428,6 +1471,10 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
         stats_by_kappa[ik] = stats_local
         stats_all_by_kappa[ik] = stats_all_local
         stats_lo_by_kappa[ik] = stats_lo_local
+        vIters_by_kappa[ik] = vIters
+        vGap_by_kappa[ik] = vGap
+        converged_by_kappa[ik] = converged
+        drift_by_kappa[ik] = final_drift
         welfare_value_function_by_kappa[ik] = welfare_value_function
         welfare_simulation_by_kappa[ik] = welfare_simulation
 
@@ -1476,7 +1523,30 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
     welfare = finalize_welfare(
         welfare_value_function_by_kappa, welfare_simulation_by_kappa, p,
     )
-    return (; C = C, H = H, Y = Y, A = A), stats, stats_all, welfare, solutions
+    # Every kappa now runs the full maxAge, so the PV tail opens at maxAge for
+    # all of them and `settledAge` is no longer a per-kappa quantity.
+    # `convergedAge` is diagnostic: 0 for a kappa means the cross-section had
+    # NOT settled by maxAge, in which case the closed-form tail rests on an
+    # assumption the path has not yet earned and maxAge should be raised.
+    # Report the ACHIEVED drift rather than a pass/fail on tolDist. Failing an
+    # absolute 1e-10 test says little on its own: what the closed-form tail
+    # needs is that (Y - C) has stopped moving, and a drift of 3e-10 and one of
+    # 3e-4 are worlds apart while both "fail". Printing the number lets the
+    # magnitude be judged. convergedAge = 0 means that kappa never got under
+    # tolDist at any age.
+    # The settling check is NOT emitted here. This routine runs once per lambda
+    # probe, and the lambda root-finder deliberately visits degenerate corners:
+    # observed warnings carried lambda = 0.01 (= lambdaMin) at qSav = 0.911 with
+    # Y[end] = 0.155 against a normal 0.927. Those probes say nothing about the
+    # answer and drowned the one solve that matters. The drift is stored in
+    # `diagnostics.finalDrift` instead and judged once, on the FINAL
+    # equilibrium, in `attach_elapsed`.
+    diagnostics = (; vIters = vIters_by_kappa, vGap = vGap_by_kappa,
+                   settledAge = p.maxAge,
+                   convergedAge = maximum(converged_by_kappa),
+                   convergedAgeByKappa = converged_by_kappa,
+                   finalDrift = drift_by_kappa)
+    return (; C = C, H = H, Y = Y, A = A), stats, stats_all, welfare, solutions, diagnostics
 end
 
 function finalize_welfare(value_function_by_kappa::Vector{Float64},
@@ -1506,22 +1576,8 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
     # Mid-cumulative interpolation rather than StatsBase's weighted-quantile
     # convention, which is biased low on a coarse nonuniform grid holding a
     # discretized continuous distribution. See `interpolated_weighted_quantile`
-    # in common/grids.jl for the measured comparison against a known median:
-    # at nA = 151 StatsBase errs by 5.8% of the median and refinement does not
-    # close the gap. Measured on this solver's own distribution at J = 39,
-    # nA = 101, the two conventions differ by 4.6%, against a calibration
-    # target of 0.0498. The infinite-horizon solvers have used this since they
-    # were written; this brings the finite pair into line.
+    # in common/grids.jl for the measured comparison against a known median.
     median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_mass, 0.5)
-    # The MPC median needs its own sort: `interpolated_weighted_quantile` walks
-    # the grid in order, and MPCs arrive in state order, not value order.
-    median_mpc = if isempty(stats.mpc_values)
-        NaN
-    else
-        ord = sortperm(stats.mpc_values)
-        interpolated_weighted_quantile(stats.mpc_values[ord],
-                                       stats.distribution_weights[ord], 0.5)
-    end
     # Both limits exist only at ages j = 0,...,J-1, so they are averaged over
     # the mass of those ages rather than over the whole population.
     mean_borrowing_limit = safe_ratio(stats.sum_borrowing_limit,
@@ -1567,26 +1623,6 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
         shareZeroAssets = stats.zero_asset_mass / total_mass,
         shareAtAssetUpperBound = share_at_asset_upper_bound,
         shareAtHoursUpperBound = share_at_hours_upper_bound,
-        # Average impact MPC over whatever ages this accumulator covered, and
-        # the share of its mass whose perturbed state left the top of the grid.
-        meanMPC = safe_ratio(stats.sum_mpc, total_mass),
-        shareMPCExtrapolated = stats.mpc_extrapolated_mass / total_mass,
-        mpcShock = p.mpc_shock,
-        mpcShockToMeanLaborIncome = safe_ratio(p.mpc_shock, mean_labor_income),
-        # The distribution of MPCs, as MPCFinder.m reports it. `medianMPC` needs
-        # the per-observation vector and so is NaN unless collect_distributions
-        # was on; every other measure here is a running sum and always present.
-        meanMPCConditionalOnPositive =
-            safe_ratio(stats.sum_mpc_positive, stats.mpc_positive_mass),
-        shareMPCPositive = stats.mpc_positive_mass / total_mass,
-        shareMPCNegative = stats.mpc_negative_mass / total_mass,
-        shareMPCZero = stats.mpc_zero_mass / total_mass,
-        medianMPC = median_mpc,
-        meanMPCAtLowAssets = safe_ratio(stats.sum_mpc_lowasset, stats.lowasset_mass),
-        shareAtLowAssets = stats.lowasset_mass / total_mass,
-        mpcLowAssetThreshold = p.mpc_lowasset_threshold,
-        mpcLowAssetThresholdToMeanLaborIncome =
-            safe_ratio(p.mpc_lowasset_threshold, mean_labor_income),
         assetUpperBound = asset_upper,
         hoursUpperBound = hours_upper,
         maxMaterialNextAssets = max_material_next_assets,
@@ -1816,10 +1852,9 @@ end
 asset_price(ap::Real, p::HIParams) = ap < 0.0 ? p.qBorr : p.qSav
 asset_prices(p::HIParams) = [asset_price(ap, p) for ap in p.a_grid]
 
-function asset_choice_lower_bound(age::Int, kappa::Float64, iz::Int, p::HIParams)
-    if age == p.J + 1
-        return 0.0
-    end
+# Infinite horizon: the borrowing limit binds at every age. The finite solver
+# replaces it with a' >= 0 at the terminal age; there is no terminal age here.
+function asset_choice_lower_bound(kappa::Float64, iz::Int, p::HIParams)
     return p.bbar * exp(kappa + p.rho * p.z_grid[iz])
 end
 
@@ -1998,3 +2033,25 @@ function find_bracket(grid, residuals)
     return nothing
 end
 
+
+"""
+    discounted_sum_with_tail(x, q)
+
+Present value of `x` over an INFINITE horizon, with the path constant at
+`x[end]` past the last element:
+
+    sum_{j=1}^{n} q^(j-1) x_j  +  x_n * q^n / (1 - q).
+
+`discounted_sum` alone stops dead at `maxAge`, which drops `q^maxAge` of the
+total -- 0.24% at qGov = 0.99 and maxAge = 600, and measurably so: outputPV
+read 88.75 at maxAge 600 against 88.96 at 1200, a gap of 0.234% where q^600
+predicts 0.2405%. The government budget never had this problem because it
+already closed its own tail; this is the same closure applied to the reported
+present values, and it makes them independent of maxAge.
+"""
+function discounted_sum_with_tail(x::AbstractVector{<:Real}, q::Real)
+    isempty(x) && return 0.0
+    0 <= q < 1 || error("discounted_sum_with_tail needs 0 <= q < 1, got q = $q")
+    n = length(x)
+    return discounted_sum(x, q) + x[n] * q^n / (1 - q)
+end

@@ -1,3 +1,12 @@
+# =============================================================================
+# run_history_independent_tax.jl
+#
+# Entry point for the history-independent tax model. Builds a parameter set
+# from SETTINGS, solves it, prints the summary, and saves or reloads results.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 using JLD2
 using Printf
 
@@ -7,16 +16,14 @@ include("model_settings.jl")
 """
     run_history_independent_tax(; kwargs...)
 
-Solve the history-independent tax model and print the
-equilibrium summary. `kwargs` override `SETTINGS` (e.g.
-`run_history_independent_tax(nA = 41, J = 4, qSav = 0.99)`).
-
-Returns a NamedTuple `(; eq, params)` where `eq` is the equilibrium
-(with policies under `eq.solutions` when `store_solutions = true`)
-and `params` is the `HIParams` used.
+Solve the model and print the equilibrium summary. `kwargs` override SETTINGS.
+Returns `(; eq, params)`; policies sit under `eq.solutions` when
+`store_solutions = true`.
 """
 function run_history_independent_tax(; kwargs...)
-    p = make_history_independent_params(; kwargs...)
+    # collect_distributions is on by default here and off in the calibration
+    # drivers and the sweeps, where the per-observation vectors are too large.
+    p = make_history_independent_params(; collect_distributions = true, kwargs...)
 
     eq = solve_history_independent_tax(p)
 
@@ -28,11 +35,8 @@ end
 """
     save_hi_result(result; dir = joinpath(@__DIR__, "results"))
 
-Save a `run_history_independent_tax()` result to `dir` under a filename built
-from the model dimensions (shell-safe: no spaces or commas), e.g.
-`result_hi_J=39_nA=101_nZ=5_nEps=5_nKappa=3.jld2`. Overwrites an existing
-file of the same name. Returns the saved path. Reload with
-`load_hi_result(path)` (after including this file, so `HIParams` is defined).
+Save a result to `dir` under a name built from the model dimensions. Overwrites
+an existing file of the same name and returns the saved path.
 """
 function save_hi_result(result; dir = joinpath(@__DIR__, "results"))
     mkpath(dir)

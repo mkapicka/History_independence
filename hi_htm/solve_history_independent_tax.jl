@@ -7,6 +7,44 @@ using Roots
 using StatsBase
 
 """
+    VINFEASIBLE
+
+Value assigned to a state with no feasible choice. FINITE on purpose.
+
+Plain `hi` uses `-Inf`, which is harmless there because the value function is
+only ever swept backwards. Here it is not: the two access states are MIXED,
+`EV_S = pSS*E[V^S] + (1-pSS)*E[V^H]`, and `0 * (-Inf) = NaN`. The pSS = 1 /
+pHH = 0 corner -- the one that has to reproduce `hi` exactly -- is precisely
+where a weight is zero, so the sentinel has to be finite for the nesting test
+to mean anything. `-1e18` dominates any attainable utility, so such states are
+never chosen when anything else is available.
+"""
+const VINFEASIBLE = -1.0e18
+
+"""
+    access_stationary_distribution(pSS, pHH)
+
+Stationary shares `(piS, piH)` of the two-state asset-market-access chain
+
+    Pr(S'=S | S) = pSS,   Pr(H'=H | H) = pHH,
+
+which is `(1-pHH, 1-pSS) / (2 - pSS - pHH)`. The initial cross-section is drawn
+from this distribution (psmodel.tex), so the hand-to-mouth share is constant
+over the life cycle rather than drifting towards it.
+
+Three parameterizations are nested. `pSS = 1, pHH = 0` makes everyone a saver
+and reproduces `hi` exactly; `pSS = 0, pHH = 1` makes everyone hand-to-mouth;
+`pHH = 1 - pSS` makes access iid with `piH = pHH`.
+"""
+function access_stationary_distribution(pSS::Real, pHH::Real)
+    denom = 2.0 - Float64(pSS) - Float64(pHH)
+    denom > 0.0 || error("pSS = $pSS and pHH = $pHH make the access chain " *
+                         "reducible (2 - pSS - pHH = $denom); the stationary " *
+                         "distribution is not unique")
+    return ((1.0 - Float64(pHH)) / denom, (1.0 - Float64(pSS)) / denom)
+end
+
+"""
     HIParams(; kwargs...)
 
 Parameters for the finite-horizon Bewley model with the history-independent
@@ -47,31 +85,33 @@ Every model parameter is a field with no hard-coded default, so `SETTINGS` in
 when supplying a complete parameter set explicitly. Fields whose default is an
 expression are derived from the fields above them.
 """
-Base.@kwdef struct HIParams
-    # Size of the unanticipated one-time windfall used for the impact MPC, and
-    # the asset threshold below which a second, conditional MPC is reported.
-    # Both are in model asset units and both follow Discrete_HA's 2019
-    # numeraire (`+setup/Params.m`: `numeraire_in_dollars = 72000`,
-    # `shocks_dollars = [-1, -500, -5000, 1, 500, 5000]`,
-    # `dollar_thresholds = [1000, ...]`):
-    #
-    #     $500  / $72,000 = 0.0069444 of mean annual labor income
-    #     $1,000 / $72,000 = 0.0138889
-    #
-    # times this calibration's mean labor income of 0.9112. They are ABSOLUTE
-    # numbers, not fractions, because a fraction of mean income could only be
-    # resolved after the forward pass that needs it; the summary prints the
-    # realized ratios so drift away from $500 and $1,000 is visible rather than
-    # assumed. RECALIBRATE and these two move -- re-derive them from the new
-    # mean labor income rather than leaving them.
-    mpc_shock::Float64
-    mpc_lowasset_threshold::Float64
 
+Base.@kwdef struct HIParams
     # Preferences and tax.
     beta::Float64
     eta::Float64
     phi::Float64
     tau::Float64
+
+    # Asset-market access. Households are in one of two exogenous states:
+    # savers (S), who choose a' freely subject to the borrowing limit, and
+    # hand-to-mouth (H), who have no access to the asset market and whose
+    # assets follow a' = a/qSav for a >= 0 and a' = a for a < 0 -- positive
+    # balances are illiquid and roll over at the going return, negative ones
+    # are serviced first, so debt neither grows nor is repaid. `pSS` and `pHH`
+    # are `s` and `h` in psmodel.tex. piS/piH are derived; do not set them.
+    #
+    # THE FINITE-HORIZON WRINKLE. psmodel.tex is written for an infinitely
+    # lived agent, so it never says what a hand-to-mouth household does at the
+    # LAST age, where `a' >= 0` is imposed so nobody dies in debt. The rule
+    # a' = a would violate that for a debtor, so at the terminal age only the
+    # rollover is clamped: a' = max(htm rule, 0). A terminal hand-to-mouth
+    # debtor therefore settles up, consuming y + a rather than y + (1-q)a.
+    # That is a modelling choice this directory makes, not one the tex dictates.
+    pSS::Float64                     # Pr(S' = S | S)
+    pHH::Float64                     # Pr(H' = H | H)
+    piS::Float64 = first(access_stationary_distribution(pSS, pHH))
+    piH::Float64 = last(access_stationary_distribution(pSS, pHH))
 
     # Ages j = 0,...,J are stored in length-(J+1) vectors at index j+1.
     J::Int
@@ -227,6 +267,15 @@ Check the parameter combinations that the individual grid builders cannot see.
 Returns `p` so it can wrap a construction.
 """
 function validate(p::HIParams)
+    0.0 <= p.pSS <= 1.0 || error("pSS must satisfy 0 <= pSS <= 1")
+    0.0 <= p.pHH <= 1.0 || error("pHH must satisfy 0 <= pHH <= 1")
+    p.pSS + p.pHH < 2.0 ||
+        error("pSS + pHH must be below 2 for a unique access distribution")
+    let (piS_check, piH_check) = access_stationary_distribution(p.pSS, p.pHH)
+        abs(p.piS - piS_check) <= 1e-12 && abs(p.piH - piH_check) <= 1e-12 ||
+            error("piS/piH do not match the stationary distribution implied " *
+                  "by pSS = $(p.pSS), pHH = $(p.pHH); leave them unset")
+    end
     # The original requirement was that a_grid contain 0.0 exactly, because
     # the initial holding was hard-coded to zero. What actually matters is that
     # it lies inside the grid and is feasible for every type.
@@ -284,31 +333,11 @@ Base.@kwdef mutable struct HIStatsAccumulator
     negative_asset_mass::Float64 = 0.0
     zero_asset_mass::Float64 = 0.0
     borrowing_constraint_mass::Float64 = 0.0
+    htm_mass::Float64 = 0.0
     upper_bound_mass::Float64 = 0.0
     hours_upper_bound_mass::Float64 = 0.0
     max_material_next_assets::Float64 = -Inf
     max_material_hours::Float64 = -Inf
-    # Mass-weighted sum of the impact MPC, and the mass whose perturbed state
-    # a + mpc_shock left the top of the asset grid and was extrapolated. The
-    # second is a diagnostic: the extrapolation continues the last segment's
-    # slope, which is a guess, so a non-negligible share means aMax is too low
-    # for the windfall.
-    sum_mpc::Float64 = 0.0
-    mpc_extrapolated_mass::Float64 = 0.0
-    # The distribution of MPCs, not just its mean, following the measures
-    # Discrete_HA's MPCFinder reports beside `avg`: the mean over responders
-    # (`mpc_condl`), the responder shares (`mpc_pos`, `mpc_neg`, `mpc0`), and
-    # the MPC of the low-liquid-wealth group (`mpc_htm_a_lt_1000`).
-    sum_mpc_positive::Float64 = 0.0
-    mpc_positive_mass::Float64 = 0.0
-    mpc_negative_mass::Float64 = 0.0
-    mpc_zero_mass::Float64 = 0.0
-    sum_mpc_lowasset::Float64 = 0.0
-    lowasset_mass::Float64 = 0.0
-    # Per-observation MPCs, pushed in lockstep with `distribution_weights` and
-    # therefore only when collect_distributions is on. The median needs the
-    # whole distribution; the means above do not.
-    mpc_values::Vector{Float64} = Float64[]
 end
 
 function HIStatsAccumulator(nA::Int)
@@ -318,14 +347,12 @@ end
 
 # How each field combines when per-kappa accumulators are reduced.
 const STATS_APPEND_FIELDS =
-    (:distribution_weights, :hours_values, :consumption_values, :mpc_values)
+    (:distribution_weights, :hours_values, :consumption_values)
 const STATS_SUM_FIELDS =
     (:total_mass, :sum_current_assets, :sum_labor_income, :sum_borrowing_limit,
      :sum_effective_borrowing_limit, :borrowing_limit_mass, :negative_asset_mass,
-     :zero_asset_mass, :borrowing_constraint_mass, :upper_bound_mass,
-     :hours_upper_bound_mass, :sum_mpc, :mpc_extrapolated_mass,
-     :sum_mpc_positive, :mpc_positive_mass, :mpc_negative_mass,
-     :mpc_zero_mass, :sum_mpc_lowasset, :lowasset_mass)
+     :zero_asset_mass, :borrowing_constraint_mass, :htm_mass, :upper_bound_mass,
+     :hours_upper_bound_mass)
 const STATS_MAX_FIELDS = (:max_material_next_assets, :max_material_hours)
 
 function merge_stats!(dest::HIStatsAccumulator, src::HIStatsAccumulator)
@@ -502,6 +529,11 @@ function print_solver_options(p::HIParams)
     # Calibrated inputs print with every digit (shortest representation that
     # round-trips to the same Float64) so they can be copied back verbatim.
     @printf("  bbar                        = %s\n", p.bbar)
+    @printf("  pSS (stay saver)            = %-20s  (s in psmodel.tex)\n", p.pSS)
+    @printf("  pHH (stay hand-to-mouth)    = %-20s  (h in psmodel.tex)\n", p.pHH)
+    @printf("  access shares (piS, piH)    = (%.8f, %.8f)%s\n",
+            p.piS, p.piH,
+            p.piH == 0.0 ? "   [NO HtM AGENTS: this is the hi model]" : "")
     @printf("  qSav                        = %-20s  (price of saving,    a' >= 0)\n", p.qSav)
     @printf("  qBorr                       = %-20s  (price of borrowing, a' < 0)\n", p.qBorr)
     @printf("  qGov                        = %-20.6f  (government discount price)\n", p.qGov)
@@ -596,33 +628,15 @@ function print_aggregate_statistics(s, p::HIParams; label::AbstractString = "")
     @printf("share negative liquid assets             = %.8f\n",
             s.shareNegativeLiquidAssets)
     @printf("%-40s = %.8f\n", bound_label, s.shareAtEffectiveBorrowingConstraint)
+    # Realized mass in the H state, against the stationary piH the initial
+    # cross-section was drawn from. The access chain starts stationary and is
+    # independent of everything else, so the two agree at every age; a gap
+    # means the forward pass lost access mass, which nothing else would reveal.
+    @printf("share hand-to-mouth (target %.6f)    = %.8f\n",
+            p.piH, s.shareHandToMouth)
     @printf("share with zero assets                   = %.8f\n", s.shareZeroAssets)
     @printf("share at upper asset bound               = %.8f\n", s.shareAtAssetUpperBound)
     @printf("share at hours upper bound               = %.8f\n", s.shareAtHoursUpperBound)
-    # Kaplan-Violante (2022) eq. (2) averaged over the ages this block covers.
-    # The shock is printed beside it, absolutely and against this block's own
-    # mean labor income, because the MPC is only interpretable with the windfall
-    # size attached -- the consumption function is concave, so a larger windfall
-    # buys a smaller MPC.
-    if hasproperty(s, :meanMPC)
-        @printf("average impact MPC                       = %.8f\n", s.meanMPC)
-        @printf("  windfall                               = %.8f  (%.6f of mean labor income)\n",
-                s.mpcShock, s.mpcShockToMeanLaborIncome)
-        @printf("  mean MPC | responders (mpc > 0)        = %.8f\n",
-                s.meanMPCConditionalOnPositive)
-        @printf("  share mpc > 0 / mpc < 0 / mpc = 0      = %.6f / %.6f / %.6f\n",
-                s.shareMPCPositive, s.shareMPCNegative, s.shareMPCZero)
-        if isfinite(s.medianMPC)
-            @printf("  median MPC                             = %.8f\n", s.medianMPC)
-        end
-        @printf("  mean MPC | a < %.6f (%.6f of Y)  = %.8f  over share %.6f\n",
-                s.mpcLowAssetThreshold, s.mpcLowAssetThresholdToMeanLaborIncome,
-                s.meanMPCAtLowAssets, s.shareAtLowAssets)
-        if s.shareMPCExtrapolated > 1e-8
-            @printf("  share extrapolated above the grid      = %.8f   [raise aMax]\n",
-                    s.shareMPCExtrapolated)
-        end
-    end
     # Only the windowed statistics carry the entry-age block; the all-ages
     # block is printed through this same function and has no such age.
     if hasproperty(s, :meanAssetsAtStatsAgeLoToMeanLaborIncome)
@@ -714,50 +728,224 @@ function government_residual_at_lambda(lambda::Float64, p::HIParams)
     return residual, eq
 end
 
+# -----------------------------------------------------------------------------
+# Hand-to-mouth block
+# -----------------------------------------------------------------------------
+
+"""
+    HTMTransition
+
+The exogenous hand-to-mouth asset rule, precomputed once per `HIParams`:
+`a' = a/qSav` for `a >= 0` and `a' = a` for `a < 0` (psmodel.tex).
+
+`a/qSav` lands between asset grid nodes by construction, so the continuation
+value and the forward transition BOTH read it through the same Young lottery
+`(left, right, weight)` stored here. Using two different placements would break
+the value-function/simulation welfare cross-check, which is the guard that this
+is implemented consistently.
+
+`cash` is `a - q(a')a'`: exactly `0` for an unclipped rollover and
+`(1-qBorr)*a < 0` for a debtor. `clipped` flags that `a/qSav` ran past the top
+grid node for some `a`, in which case `a'` is held at `aMax` and the excess is
+consumed -- the rule has no fixed point above zero, so only the grid stops it.
+
+TWO VARIANTS. `terminal = true` additionally clamps `a' >= 0`, because the last
+age imposes that on savers and a hand-to-mouth debtor would otherwise die owing
+money. A terminal debtor then settles up: `a' = 0` and `cash = a`, so
+consumption is `y + a` rather than `y + (1-qBorr)a`. psmodel.tex is
+infinite-horizon and says nothing about this; it is a choice made here.
+"""
+struct HTMTransition
+    next_assets::Vector{Float64}
+    cash::Vector{Float64}
+    left::Vector{Int}
+    right::Vector{Int}
+    weight::Vector{Float64}
+    clipped::Bool
+end
+
+function htm_transition(p::HIParams; terminal::Bool = false)
+    nA = length(p.a_grid)
+    a_top = last(p.a_grid)
+    next_assets = Vector{Float64}(undef, nA)
+    cash = Vector{Float64}(undef, nA)
+    left = Vector{Int}(undef, nA)
+    right = Vector{Int}(undef, nA)
+    weight = Vector{Float64}(undef, nA)
+    clipped = false
+
+    for ia in 1:nA
+        a = p.a_grid[ia]
+        if a >= 0.0
+            ap = a / p.qSav
+            if ap > a_top
+                clipped = true
+                ap = a_top
+                cash[ia] = a - p.qSav * ap
+            else
+                # Set to zero rather than evaluating a - qSav*(a/qSav), which
+                # is the same number up to a rounding error that would leak
+                # into consumption at every positive-asset HtM state.
+                cash[ia] = 0.0
+            end
+        elseif terminal
+            ap = 0.0
+            cash[ia] = a                      # settle up: c = y + a
+        else
+            ap = a
+            cash[ia] = a - p.qBorr * ap       # (1 - qBorr) * a < 0
+        end
+        next_assets[ia] = ap
+        l, r, w = asset_transition_weights(ap, p)
+        left[ia] = l; right[ia] = r; weight[ia] = w
+    end
+
+    return HTMTransition(next_assets, cash, left, right, weight, clipped)
+end
+
+"""
+    precompute_htm_payoffs(lambda, tax_base, htm, p)
+
+Flow utility and hours for the hand-to-mouth state, over `(a, z, eps)`.
+
+The HtM choice is STATIC: `a'` is exogenous and nothing else links periods, so
+hours solve the same within-period first-order condition the saver uses, at
+`cash = a - q(a')a'`, with no continuation term. That is why this is computed
+once per `(lambda, kappa)` and reused at every age, and why the HtM half of the
+backward recursion never maximizes -- it only evaluates. (The history-DEPENDENT
+extension in `hdinf_htm` has no such shortcut: there hours move the past-income
+stocks, so its HtM block must maximize on every sweep.)
+"""
+function precompute_htm_payoffs(lambda::Float64, tax_base::Matrix{Float64},
+                                htm::HTMTransition, p::HIParams)
+    nA = length(p.a_grid)
+    nZ = length(p.z_grid)
+    nE = length(p.eps_grid)
+    flow_u = fill(-Inf, nA, nZ, nE)
+    flow_h = fill(NaN, nA, nZ, nE)
+
+    @inbounds for ia in 1:nA
+        cash = htm.cash[ia]
+        for iz in 1:nZ, ie in 1:nE
+            u, h = optimal_labor_foc(cash, lambda * tax_base[iz, ie], p)
+            if isfinite(u)
+                flow_u[ia, iz, ie] = u
+                flow_h[ia, iz, ie] = h
+            end
+        end
+    end
+    return flow_u, flow_h
+end
+
+"""
+    update_htm_values!(VcurH, policyHtmH, flow_u_H, flow_h_H, EV_H, htm, age, p,
+                       util_weight, beta)
+
+One age of the hand-to-mouth recursion. No maximization: the static flow payoff
+is looked up and the continuation is read at the exogenous `a'` through the
+stored Young lottery.
+"""
+function update_htm_values!(VcurH, policyHtmH, flow_u_H, flow_h_H, EV_H,
+                            htm::HTMTransition, age::Int, p::HIParams,
+                            util_weight::Float64, beta::Float64)
+    nA = length(p.a_grid)
+    nZ = length(p.z_grid)
+    nE = length(p.eps_grid)
+    @inbounds for ia in 1:nA
+        il = htm.left[ia]
+        ir = htm.right[ia]
+        w = htm.weight[ia]
+        for iz in 1:nZ
+            continuation = (1.0 - w) * EV_H[il, iz] + w * EV_H[ir, iz]
+            for ie in 1:nE
+                u = flow_u_H[ia, iz, ie]
+                VcurH[ia, iz, ie] = isfinite(u) ?
+                    util_weight * u + beta * continuation : VINFEASIBLE
+                policyHtmH[ia, iz, ie, age] = flow_h_H[ia, iz, ie]
+            end
+        end
+    end
+    return nothing
+end
+
 function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
                                   first_ap::Vector{Int},
                                   terminal_first_ap::Int,
                                   q_by_ap::Vector{Float64},
-                                  tax_base::Matrix{Float64}, p::HIParams)
+                                  tax_base::Matrix{Float64},
+                                  htm::HTMTransition, htm_terminal::HTMTransition,
+                                  p::HIParams)
     nA = length(p.a_grid)
     nZ = length(p.z_grid)
     nE = length(p.eps_grid)
     nAge = p.J + 1
 
-    Vnext = zeros(nA, nZ, nE)
-    Vcur = similar(Vnext)
-    EV = zeros(nA, nZ)
+    # One value function per access state. The saver's own block is untouched;
+    # it just receives the MIXED continuation in place of the plain one.
+    VnextS = zeros(nA, nZ, nE)
+    VcurS = similar(VnextS)
+    VnextH = zeros(nA, nZ, nE)
+    VcurH = similar(VnextH)
+    EVS_raw = zeros(nA, nZ)
+    EVH_raw = zeros(nA, nZ)
+    EVmixS = zeros(nA, nZ)
+    EVmixH = zeros(nA, nZ)
     policyAIndex = Array{Int32}(undef, nA, nZ, nE, nAge)
     policyA = Array{Float64}(undef, nA, nZ, nE, nAge)
     policyH = Array{Float64}(undef, nA, nZ, nE, nAge)
+    policyHtmH = Array{Float64}(undef, nA, nZ, nE, nAge)
 
     flow_u, flow_h = p.asset_choice_method == :grid_search ?
                      precompute_flow_payoffs(lambda, first_ap, q_by_ap, tax_base, p) :
                      (nothing, nothing)
+    # Static, so computed once and reused at every age -- except the terminal
+    # age, whose asset rule differs and therefore whose cash does too.
+    flow_u_H, flow_h_H = precompute_htm_payoffs(lambda, tax_base, htm, p)
+    flow_u_HT, flow_h_HT = precompute_htm_payoffs(lambda, tax_base, htm_terminal, p)
 
     beta = p.beta
     util_weight = 1.0 - beta
 
     for age in nAge:-1:1
-        compute_expected_value!(EV, Vnext, p)
+        compute_expected_value!(EVS_raw, VnextS, p)
+        compute_expected_value!(EVH_raw, VnextH, p)
+        # The access shock is independent of (z', eps'), so the mixing is done
+        # AFTER the expectation and the saver's solver sees a drop-in
+        # replacement for EV. A state with no feasible choice carries the
+        # FINITE sentinel, so these products are 0.0 when the weight is zero;
+        # with -Inf the pSS = 1 corner would be NaN.
+        @inbounds for i in eachindex(EVS_raw)
+            evs = EVS_raw[i]
+            evh = EVH_raw[i]
+            EVmixS[i] = p.pSS * evs + (1.0 - p.pSS) * evh
+            EVmixH[i] = p.pHH * evh + (1.0 - p.pHH) * evs
+        end
 
         if p.asset_choice_method == :grid_search
             solve_policy_age_grid_search!(
-                Vcur, policyAIndex, policyA, policyH, flow_u, flow_h, EV,
+                VcurS, policyAIndex, policyA, policyH, flow_u, flow_h, EVmixS,
                 age, first_ap, terminal_first_ap, p, util_weight, beta,
             )
         else
             solve_policy_age_interpolated!(
-                Vcur, policyAIndex, policyA, policyH, EV, age, lambda, kappa,
+                VcurS, policyAIndex, policyA, policyH, EVmixS, age, lambda, kappa,
                 tax_base, p, util_weight, beta,
             )
         end
 
-        Vnext, Vcur = Vcur, Vnext
+        is_terminal = age == nAge
+        update_htm_values!(VcurH, policyHtmH,
+                           is_terminal ? flow_u_HT : flow_u_H,
+                           is_terminal ? flow_h_HT : flow_h_H,
+                           EVmixH, is_terminal ? htm_terminal : htm,
+                           age, p, util_weight, beta)
+
+        VnextS, VcurS = VcurS, VnextS
+        VnextH, VcurH = VcurH, VnextH
     end
 
-    welfare_value_function = expected_initial_value(Vnext, kappa, p)
-    return policyAIndex, policyA, policyH, welfare_value_function
+    welfare_value_function = expected_initial_value(VnextS, VnextH, kappa, p)
+    return policyAIndex, policyA, policyH, policyHtmH, welfare_value_function
 end
 
 """
@@ -776,12 +964,19 @@ function initial_asset_weights(kappa::Float64, p::HIParams)
     return asset_transition_weights(clamp(a0, first(p.a_grid), last(p.a_grid)), p)
 end
 
-function expected_initial_value(V0, kappa::Float64, p::HIParams)
+# Newborns draw their access state from the STATIONARY distribution (piS, piH),
+# independently of (a0, z, eps), so the birth value is the piS/piH mix of the
+# two value functions at the same asset placement. `simulate_kappa!` seeds the
+# distribution the same way; if the two disagree, the welfare cross-check in
+# `finalize_welfare` reports it.
+function expected_initial_value(V0S, V0H, kappa::Float64, p::HIParams)
     il, ir, w = initial_asset_weights(kappa, p)
     expected_value = 0.0
     @inbounds for iz in eachindex(p.z_grid), ie in eachindex(p.eps_grid)
         prob = p.z0_probs[iz] * p.Peps[ie]
-        expected_value += prob * ((1.0 - w) * V0[il, iz, ie] + w * V0[ir, iz, ie])
+        vS = (1.0 - w) * V0S[il, iz, ie] + w * V0S[ir, iz, ie]
+        vH = (1.0 - w) * V0H[il, iz, ie] + w * V0H[ir, iz, ie]
+        expected_value += prob * (p.piS * vS + p.piH * vH)
     end
     return expected_value
 end
@@ -799,7 +994,7 @@ function solve_policy_age_grid_search!(Vcur, policyAIndex, policyA, policyH,
         for iz in 1:nZ
             ia_first = age == p.J + 1 ? terminal_first_ap : first_ap[iz]
             for ie in 1:nE
-                best_val = -Inf
+                best_val = VINFEASIBLE
                 best_iap = ia_first
                 best_h = p.hMin
 
@@ -1033,7 +1228,7 @@ end
     accumulate_stats!(stats, weighted_mass, ia, a, ap, h, c, y,
                       true_borrowing_limit, effective_borrowing_limit,
                       at_borrowing_constraint, at_asset_upper, h_upper,
-                      binding_age, collect, p)
+                      binding_age, is_htm, collect, p)
 
 Add one (age, state) observation to a statistics accumulator.
 
@@ -1056,15 +1251,14 @@ Marked `@inline`: this is the innermost loop of the forward pass.
                                    effective_borrowing_limit::Float64,
                                    at_borrowing_constraint::Bool,
                                    at_asset_upper::Bool, h_upper::Float64,
-                                   binding_age::Bool, mpc::Float64,
-                                   mpc_extrapolated::Bool, collect::Bool, p::HIParams)
+                                   binding_age::Bool, is_htm::Bool,
+                                   collect::Bool, p::HIParams)
     @inbounds begin
         stats.asset_mass[ia] += weighted_mass
         if collect
             push!(stats.distribution_weights, weighted_mass)
             push!(stats.hours_values, h)
             push!(stats.consumption_values, c)
-            push!(stats.mpc_values, mpc)
         end
         stats.total_mass += weighted_mass
         stats.sum_current_assets += weighted_mass * a
@@ -1087,143 +1281,14 @@ Marked `@inline`: this is the innermost loop of the forward pass.
         if at_borrowing_constraint
             stats.borrowing_constraint_mass += weighted_mass
         end
+        if is_htm
+            stats.htm_mass += weighted_mass
+        end
         if at_asset_upper
             stats.upper_bound_mass += weighted_mass
         end
         if h >= h_upper - upper_bound_level_tol(h_upper)
             stats.hours_upper_bound_mass += weighted_mass
-        end
-        stats.sum_mpc += weighted_mass * mpc
-        if mpc_extrapolated
-            stats.mpc_extrapolated_mass += weighted_mass
-        end
-        # Exact zero rather than a tolerance, matching `mpcs(:)==0` in
-        # MPCFinder.m: an exact zero here means a flat segment of the
-        # interpolated consumption function, which is a real feature of a
-        # grid-search policy and not floating-point noise.
-        if mpc > 0.0
-            stats.sum_mpc_positive += weighted_mass * mpc
-            stats.mpc_positive_mass += weighted_mass
-        elseif mpc < 0.0
-            stats.mpc_negative_mass += weighted_mass
-        else
-            stats.mpc_zero_mass += weighted_mass
-        end
-        if a < p.mpc_lowasset_threshold
-            stats.sum_mpc_lowasset += weighted_mass * mpc
-            stats.lowasset_mass += weighted_mass
-        end
-    end
-    return nothing
-end
-
-# =============================================================================
-# THE IMPACT MPC
-# =============================================================================
-# Kaplan and Violante (2022, Annu. Rev. Econ.), their equation (2): for a
-# household whose state is (b, y) when an unanticipated one-time windfall of
-# size x arrives,
-#
-#     m_0(x; b, y) = [ c(b + x, y) - c(b, y) ] / x,
-#
-# and the average (their Online Appendix, equation D.7) integrates that function
-# under the distribution,
-#
-#     mbar_0(x) = int m_0(x; b, y) dmu(b, y).
-#
-# Here the windfall lands on current assets, which is the model's cash-on-hand
-# margin: m_0 = [c(a + x, z, eps, j) - c(a, z, eps, j)] / x, averaged with the
-# forward-pass mass. Two coverages are reported, which is the one departure from
-# KV asked for: ages j = 0,...,J (`statisticsAllAges`) and the calibration
-# window stats_age_lo,...,stats_age_hi (`statistics`). KV have no age dimension
-# to choose between -- their baseline is infinite-horizon and mu is stationary.
-#
-# TWO THINGS THE LEVEL IS NOT COMPARABLE TO. First, KV report a QUARTERLY MPC
-# out of $500; this model is annual, so this is an annual MPC out of an annual
-# windfall and will be larger for the same household. Second, hours are
-# endogenous here and exogenous in KV's baseline, so c(a + x) embeds a labor
-# supply response: the windfall relaxes the budget, hours fall, and the
-# consumption response is net of that. The FORMULA is theirs exactly; the
-# consumption function it is applied to is this model's.
-#
-# c(a + x) is read off the consumption policy by linear interpolation in a,
-# which is what the Kaplan-lineage codes do (`coninterp_mpc` in Discrete_HA).
-#
-# ACCURACY, MEASURED. At the terminal age a' = 0 binds, so the problem is static
-# and c(a) has a closed form: h solves A(1-tau) = c phi h^(eta+tau) with
-# A = lambda*tax_base. Against the EXACT ARC [c(a+x) - c(a)]/x built from that
-# root, the reported MPC converges in the asset grid at better than first order
-# (:interpolate, J=39, nZ=nEps=5, nKappa=3): worst cell 2.04e-2, 9.02e-3,
-# 3.78e-3, 1.46e-3 at nA = 51, 101, 201, 401, mean error 4.55e-3 to 3.03e-4.
-# Benchmark it against the DERIVATIVE instead and a 2.2% floor appears that no
-# refinement removes -- that gap is real convexity of c over the windfall, not
-# error, since dc/da = (eta+tau)/(phi h^(1+eta) + eta+tau) RISES with a as hours
-# fall. KV's object is the arc, which is why they report MPCs per shock size.
-#
-# GRID RESOLUTION MATTERS MORE THAN THE METHOD, but both converge. The average
-# MPC under :grid_search exceeds :interpolate by 5.41% at nA = 101 and 1.91% at
-# nA = 201, then agrees to -0.48% at nA = 401 (0.28542 against 0.28681): a'(a)
-# is a step function under grid search and c inherits a sawtooth, which biases
-# the MPC UP at coarse grids rather than permanently. At the production nA = 151
-# expect :grid_search to overstate by roughly 3%; raise nA or switch to
-# :interpolate when the MPC is the object of interest. The summary reports which
-# method produced the number.
-@inline function interpolate_consumption(con::AbstractVector{Float64},
-                                        a_target::Float64, p::HIParams)
-    grid = p.a_grid
-    nA = length(grid)
-    # OFF-GRID, FOLLOWING `extend_interp` IN Discrete_HA's solve_EGP.m.
-    # Above the top node MATLAB's `griddedInterpolant(..., 'linear')` continues
-    # the last segment's slope, so that is what happens here: CLAMPING instead
-    # would report slope 0 and drive the MPC of those cells to zero, which is
-    # the wrong sign of error for a household rich enough to leave the grid.
-    # The flag is still returned, because extrapolating is a statement about
-    # aMax being too low for the windfall, not a result.
-    if a_target >= grid[nA]
-        slope = (con[nA] - con[nA-1]) / (grid[nA] - grid[nA-1])
-        return con[nA] + slope * (a_target - grid[nA]), true
-    elseif a_target <= grid[1]
-        # Their rule below the grid: consume the whole shortfall, slope 1.
-        # Unreachable for a positive windfall, since a_grid[1] is the borrowing
-        # limit; kept so a negative `mpc_shock` behaves as it does in their code.
-        return con[1] + (a_target - grid[1]), false
-    end
-    # The grid is sorted, so one searchsorted is enough; `i` is the first index
-    # at or above the target, so the bracket is (i-1, i) with i >= 2.
-    i = searchsortedfirst(grid, a_target)
-    i <= 1 && return con[1], false
-    lo, hi = grid[i-1], grid[i]
-    w = (a_target - lo) / (hi - lo)
-    return (1.0 - w) * con[i-1] + w * con[i], false
-end
-
-# Consumption on the whole asset grid at one age, which is what the MPC needs:
-# the perturbed state a + x sits at a different asset index, so the policy must
-# be available away from the cell being visited. Filled once per age into a
-# reused buffer rather than carried for every age at once.
-function fill_consumption_policy!(con::Array{Float64,3}, age::Int,
-                                  policyAIndex, policyA, policyH,
-                                  q_by_ap::Vector{Float64},
-                                  tax_base::Matrix{Float64},
-                                  p::HIParams, lambda::Float64)
-    nA = length(p.a_grid)
-    nZ = length(p.z_grid)
-    nE = length(p.eps_grid)
-    on_grid = p.asset_choice_method == :grid_search
-    @inbounds for ia in 1:nA
-        a = p.a_grid[ia]
-        for iz in 1:nZ, ie in 1:nE
-            if on_grid
-                iap = Int(policyAIndex[ia, iz, ie, age])
-                ap = p.a_grid[iap]
-                q_ap = q_by_ap[iap]
-            else
-                ap = policyA[ia, iz, ie, age]
-                q_ap = asset_price(ap, p)
-            end
-            h = policyH[ia, iz, ie, age]
-            con[ia, iz, ie] =
-                lambda * tax_base[iz, ie] * h^(1.0 - p.tau) + a - q_ap * ap
         end
     end
     return nothing
@@ -1232,29 +1297,33 @@ end
 function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                          stats_all::HIStatsAccumulator,
                          stats_lo::HIStatsAccumulator,
-                         policyAIndex, policyA, policyH, kappa, pkappa,
+                         policyAIndex, policyA, policyH, policyHtmH,
+                         kappa, pkappa,
                          first_ap::Vector{Int}, terminal_first_ap::Int,
                          q_by_ap::Vector{Float64},
                          tax_base::Matrix{Float64}, wage_base::Matrix{Float64},
+                         htm::HTMTransition, htm_terminal::HTMTransition,
                          p::HIParams, lambda::Float64)
     nA = length(p.a_grid)
     nZ = length(p.z_grid)
     nE = length(p.eps_grid)
     nAge = p.J + 1
-    dist = zeros(nA, nZ, nE)
+    dist = zeros(nA, nZ, nE, 2)   # 4th axis: 1 = saver, 2 = hand-to-mouth
     dist_next = similar(dist)
     ia0_left, ia0_right, ia0_w = initial_asset_weights(kappa, p)
     h_upper = hours_upper_bound(p)
+    a_top = last(p.a_grid)
     welfare_simulation = 0.0
-    # Consumption over the whole asset grid at the age being visited, refilled
-    # once per age; the MPC reads c(a + mpc_shock) off it.
-    con_age = Array{Float64}(undef, nA, nZ, nE)
-    mpc_shock = p.mpc_shock
 
+    # Newborns draw the access state from the stationary distribution, so the
+    # HtM share is constant over the life cycle. `expected_initial_value` mixes
+    # the birth value functions with the same weights.
     @inbounds for iz in 1:nZ, ie in 1:nE
         prob = p.z0_probs[iz] * p.Peps[ie]
-        dist[ia0_left, iz, ie] += (1.0 - ia0_w) * prob
-        dist[ia0_right, iz, ie] += ia0_w * prob
+        for (iacc, share) in ((1, p.piS), (2, p.piH))
+            dist[ia0_left, iz, ie, iacc] += (1.0 - ia0_w) * prob * share
+            dist[ia0_right, iz, ie, iacc] += ia0_w * prob * share
+        end
     end
 
     @inbounds for age in 1:nAge
@@ -1262,18 +1331,35 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
         at_stats_age_lo = age == p.stats_age_lo
         fill!(dist_next, 0.0)
         utility_weight = (1.0 - p.beta) * p.beta^(age - 1)
-        fill_consumption_policy!(con_age, age, policyAIndex, policyA, policyH,
-                                 q_by_ap, tax_base, p, lambda)
 
         for ia in 1:nA
             a = p.a_grid[ia]
-            for iz in 1:nZ, ie in 1:nE
-                mass = dist[ia, iz, ie]
+            for iz in 1:nZ, ie in 1:nE, iacc in 1:2
+                mass = dist[ia, iz, ie, iacc]
                 if mass <= p.massTol
                     continue
                 end
+                is_htm = iacc == 2
 
-                if p.asset_choice_method == :grid_search
+                if is_htm
+                    # Exogenous rule, clamped to a' >= 0 at the terminal age.
+                    # The borrowing limit is not a constraint on someone who
+                    # does not choose, so at_borrowing_constraint is false.
+                    hm = age == nAge ? htm_terminal : htm
+                    ap = hm.next_assets[ia]
+                    q_ap = asset_price(ap, p)
+                    lower_idx = age == nAge ? terminal_first_ap : first_ap[iz]
+                    lower_ap = p.a_grid[lower_idx]
+                    at_borrowing_constraint = false
+                    at_asset_upper = ap >= a_top - upper_bound_level_tol(a_top)
+                    next_left = hm.left[ia]
+                    next_right = hm.right[ia]
+                    next_right_weight = hm.weight[ia]
+                    # The SAME cash the value function's flow payoff used;
+                    # a - q_ap*ap agrees analytically but carries rounding
+                    # noise on the positive branch, where it must be 0.
+                    cash = hm.cash[ia]
+                elseif p.asset_choice_method == :grid_search
                     iap = Int(policyAIndex[ia, iz, ie, age])
                     ap = p.a_grid[iap]
                     q_ap = q_by_ap[iap]
@@ -1284,6 +1370,7 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                     next_left = iap
                     next_right = iap
                     next_right_weight = 0.0
+                    cash = a - q_ap * ap
                 else
                     ap = policyA[ia, iz, ie, age]
                     q_ap = asset_price(ap, p)
@@ -1293,9 +1380,16 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                     at_asset_upper =
                         ap >= asset_upper_bound(p) - asset_choice_bound_tol(asset_upper_bound(p), p)
                     next_left, next_right, next_right_weight = asset_transition_weights(ap, p)
+                    cash = a - q_ap * ap
                 end
-                h = policyH[ia, iz, ie, age]
-                c = lambda * tax_base[iz, ie] * h^(1.0 - p.tau) + a - q_ap * ap
+                h = is_htm ? policyHtmH[ia, iz, ie, age] : policyH[ia, iz, ie, age]
+                if !(h > 0.0)
+                    acc_label = is_htm ? "H" : "S"
+                    error("infeasible policy on a positive-mass state " *
+                          "(age=$age, ia=$ia, iz=$iz, ie=$ie, " *
+                          "access=$acc_label): no feasible choice was found")
+                end
+                c = lambda * tax_base[iz, ie] * h^(1.0 - p.tau) + cash
                 y = wage_base[iz, ie] * h
                 u = log(c) - p.phi * h^(1.0 + p.eta) / (1.0 + p.eta)
                 # A borrowing limit only exists before the terminal age, where
@@ -1306,17 +1400,6 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                                        -p.bbar * exp(kappa + p.rho * p.z_grid[iz]) : 0.0
                 effective_borrowing_limit = binding_age ? -lower_ap : 0.0
                 welfare_simulation += utility_weight * mass * u
-
-                # The impact MPC at this cell. c(a) is recomputed from the
-                # policy buffer rather than reusing `c` above so that both legs
-                # of the difference come from the SAME interpolant: mixing the
-                # exact c(a) with an interpolated c(a + x) would put the
-                # interpolation error straight into the numerator.
-                c_here, _ = interpolate_consumption(view(con_age, :, iz, ie),
-                                                    a, p)
-                c_up, mpc_extrapolated = interpolate_consumption(
-                    view(con_age, :, iz, ie), a + mpc_shock, p)
-                mpc = (c_up - c_here) / mpc_shock
 
                 weighted_mass = pkappa * mass
                 C[age] += weighted_mass * c
@@ -1334,20 +1417,25 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                 accumulate_stats!(stats_all, weighted_mass, ia, a, ap, h, c, y,
                                   true_borrowing_limit, effective_borrowing_limit,
                                   at_borrowing_constraint, at_asset_upper,
-                                  h_upper, binding_age, mpc, mpc_extrapolated, false, p)
+                                  h_upper, binding_age, is_htm, false, p)
                 in_stats_window &&
                     accumulate_stats!(stats, weighted_mass, ia, a, ap, h, c, y,
                                       true_borrowing_limit, effective_borrowing_limit,
                                       at_borrowing_constraint, at_asset_upper,
-                                      h_upper, binding_age, mpc, mpc_extrapolated,
-                                      p.collect_distributions, p)
+                                      h_upper, binding_age, is_htm, p.collect_distributions, p)
                 at_stats_age_lo &&
                     accumulate_stats!(stats_lo, weighted_mass, ia, a, ap, h, c, y,
                                       true_borrowing_limit, effective_borrowing_limit,
                                       at_borrowing_constraint, at_asset_upper,
-                                      h_upper, binding_age, mpc, mpc_extrapolated, false, p)
+                                      h_upper, binding_age, is_htm, false, p)
 
                 if age < nAge
+                    # The access chain is independent of (z', eps') and of a',
+                    # so the (a', z', eps') mass is built exactly as in `hi`
+                    # and then split across the two access states.
+                    stay_weight = is_htm ? p.pHH : p.pSS
+                    switch_weight = 1.0 - stay_weight
+                    iacc_switch = 3 - iacc
                     for izp in 1:nZ
                         zprob = p.Pz[iz, izp]
                         if zprob == 0.0
@@ -1355,11 +1443,17 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                         end
                         for iep in 1:nE
                             next_mass = mass * zprob * p.Peps[iep]
-                            dist_next[next_left, izp, iep] +=
-                                (1.0 - next_right_weight) * next_mass
+                            left_mass = (1.0 - next_right_weight) * next_mass
+                            dist_next[next_left, izp, iep, iacc] +=
+                                stay_weight * left_mass
+                            dist_next[next_left, izp, iep, iacc_switch] +=
+                                switch_weight * left_mass
                             if next_right != next_left && next_right_weight > 0.0
-                                dist_next[next_right, izp, iep] +=
-                                    next_right_weight * next_mass
+                                right_mass = next_right_weight * next_mass
+                                dist_next[next_right, izp, iep, iacc] +=
+                                    stay_weight * right_mass
+                                dist_next[next_right, izp, iep, iacc_switch] +=
+                                    switch_weight * right_mass
                             end
                         end
                     end
@@ -1398,6 +1492,9 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
                     Vector{Array{Float64,4}}(undef, nKappa) : Array{Float64,4}[]
     q_by_ap = asset_prices(p)
     terminal_first_ap = first_nonnegative_asset_index(p)
+    # kappa-independent, so built once and shared read-only across threads.
+    htm = htm_transition(p)
+    htm_terminal = htm_transition(p; terminal = true)
     welfare_value_function_by_kappa = Vector{Float64}(undef, length(p.kappa_grid))
     welfare_simulation_by_kappa = similar(welfare_value_function_by_kappa)
 
@@ -1408,9 +1505,11 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
         pkappa = p.Pkappa[ik]
         first_ap = first_feasible_asset_indices(kappa, p)
         tax_base, wage_base = precompute_income_bases(kappa, p)
-        policyAIndex, policyA, policyH, welfare_value_function = solve_policies_for_kappa(
-            lambda, kappa, first_ap, terminal_first_ap, q_by_ap, tax_base, p,
-        )
+        policyAIndex, policyA, policyH, policyHtmH, welfare_value_function =
+            solve_policies_for_kappa(
+                lambda, kappa, first_ap, terminal_first_ap, q_by_ap, tax_base,
+                htm, htm_terminal, p,
+            )
         C_local = C_by_kappa[ik]
         H_local = H_by_kappa[ik]
         Y_local = Y_by_kappa[ik]
@@ -1421,9 +1520,9 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
         welfare_simulation = simulate_kappa!(
             C_local, H_local, Y_local, A_local, stats_local,
             stats_all_local, stats_lo_local,
-            policyAIndex, policyA, policyH,
+            policyAIndex, policyA, policyH, policyHtmH,
             kappa, pkappa, first_ap, terminal_first_ap, q_by_ap,
-            tax_base, wage_base, p, lambda,
+            tax_base, wage_base, htm, htm_terminal, p, lambda,
         )
         stats_by_kappa[ik] = stats_local
         stats_all_by_kappa[ik] = stats_all_local
@@ -1513,15 +1612,6 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
     # target of 0.0498. The infinite-horizon solvers have used this since they
     # were written; this brings the finite pair into line.
     median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_mass, 0.5)
-    # The MPC median needs its own sort: `interpolated_weighted_quantile` walks
-    # the grid in order, and MPCs arrive in state order, not value order.
-    median_mpc = if isempty(stats.mpc_values)
-        NaN
-    else
-        ord = sortperm(stats.mpc_values)
-        interpolated_weighted_quantile(stats.mpc_values[ord],
-                                       stats.distribution_weights[ord], 0.5)
-    end
     # Both limits exist only at ages j = 0,...,J-1, so they are averaged over
     # the mass of those ages rather than over the whole population.
     mean_borrowing_limit = safe_ratio(stats.sum_borrowing_limit,
@@ -1529,6 +1619,7 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
     mean_effective_borrowing_limit = safe_ratio(stats.sum_effective_borrowing_limit,
                                                 stats.borrowing_limit_mass)
     share_at_effective_borrowing_constraint = stats.borrowing_constraint_mass / total_mass
+    share_hand_to_mouth = stats.htm_mass / total_mass
     share_at_asset_upper_bound = stats.upper_bound_mass / total_mass
     share_at_hours_upper_bound = stats.hours_upper_bound_mass / total_mass
     max_material_next_assets =
@@ -1564,29 +1655,10 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
             safe_ratio(mean_effective_borrowing_limit, mean_labor_income),
         shareNegativeLiquidAssets = stats.negative_asset_mass / total_mass,
         shareAtEffectiveBorrowingConstraint = share_at_effective_borrowing_constraint,
+        shareHandToMouth = share_hand_to_mouth,
         shareZeroAssets = stats.zero_asset_mass / total_mass,
         shareAtAssetUpperBound = share_at_asset_upper_bound,
         shareAtHoursUpperBound = share_at_hours_upper_bound,
-        # Average impact MPC over whatever ages this accumulator covered, and
-        # the share of its mass whose perturbed state left the top of the grid.
-        meanMPC = safe_ratio(stats.sum_mpc, total_mass),
-        shareMPCExtrapolated = stats.mpc_extrapolated_mass / total_mass,
-        mpcShock = p.mpc_shock,
-        mpcShockToMeanLaborIncome = safe_ratio(p.mpc_shock, mean_labor_income),
-        # The distribution of MPCs, as MPCFinder.m reports it. `medianMPC` needs
-        # the per-observation vector and so is NaN unless collect_distributions
-        # was on; every other measure here is a running sum and always present.
-        meanMPCConditionalOnPositive =
-            safe_ratio(stats.sum_mpc_positive, stats.mpc_positive_mass),
-        shareMPCPositive = stats.mpc_positive_mass / total_mass,
-        shareMPCNegative = stats.mpc_negative_mass / total_mass,
-        shareMPCZero = stats.mpc_zero_mass / total_mass,
-        medianMPC = median_mpc,
-        meanMPCAtLowAssets = safe_ratio(stats.sum_mpc_lowasset, stats.lowasset_mass),
-        shareAtLowAssets = stats.lowasset_mass / total_mass,
-        mpcLowAssetThreshold = p.mpc_lowasset_threshold,
-        mpcLowAssetThresholdToMeanLaborIncome =
-            safe_ratio(p.mpc_lowasset_threshold, mean_labor_income),
         assetUpperBound = asset_upper,
         hoursUpperBound = hours_upper,
         maxMaterialNextAssets = max_material_next_assets,

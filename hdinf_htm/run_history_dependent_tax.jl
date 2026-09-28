@@ -4,7 +4,7 @@ using Printf
 include("solve_history_dependent_tax.jl")   # defines module HistoryDependentTax
                                             # (loads model_settings.jl internally)
 
-using .HistoryDependentTax
+using .HistoryDependentTaxInfinite
 
 """
     run_history_dependent_tax(; kwargs...)
@@ -49,11 +49,16 @@ Reload with `load_hd_result(path)` (after including this file, so the
 function save_hd_result(result; dir = joinpath(@__DIR__, "results"))
     mkpath(dir)
     p = result.params
+    # `p.J` was used here, which HDParams does not define in an infinite
+    # horizon -- the call threw a FieldError before writing anything. maxAge
+    # replaces it. pSS/pHH are in the name for the same reason the dimensions
+    # are: two runs differing only in the access chain are different models.
     name = @sprintf(
-        "result_mu1=%.3f_mu2=%.3f_J=%d_nA=%d_nS1=%d_nS2=%d_nZ=%d_nEps=%d_nKappa=%d.jld2",
-        p.mu1, p.mu2, p.J, length(p.a_grid),
+        "result_mu1=%.3f_mu2=%.3f_maxAge=%d_nA=%d_nS1=%d_nS2=%d_nZ=%d_nEps=%d_nKappa=%d_pSS=%.4f_pHH=%.4f.jld2",
+        p.mu1, p.mu2, p.maxAge, length(p.a_grid),
         length(p.s1_grid), length(p.s2_grid),
-        length(p.z_grid), length(p.eps_grid), length(p.kappa_grid))
+        length(p.z_grid), length(p.eps_grid), length(p.kappa_grid),
+        p.pSS, p.pHH)
     path = joinpath(dir, name)
     jldsave(path; eq = result.eq, params = p)
     return path

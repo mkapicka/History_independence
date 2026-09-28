@@ -1,0 +1,173 @@
+# mu2 equal to zero
+
+run_history_dependent_tax(mu1 = 0, mu2 = 0, alpha = 0, tau = 0.181, nA = 101, nEps = 11, nZ=15, nKappa = 3, nS2 = 101, s_grid_method = :quantile, labor_grid_size=151);
+
+=== History-dependent tax finite-horizon solver ===
+Options:
+  age dimension J               = 39
+  shock grid dimension nZ       = 15
+  shock grid dimension nEps     = 11
+  shock grid dimension nKappa   = 3
+  z_discretization_method       = :rouwenhorst  (alternatives: :rouwenhorst, :tauchen)
+  asset grid dimension nA       = 101
+  asset grid bounds             = [-1.179095, 15.000000]
+  asset grid method             = :nonuniform  (alternatives: :nonuniform, :linear)
+  bbar                          = -0.17014842731387517
+  labor grid size               = 151 on [0.0500, 5.0000]
+  labor grid spacing            = :log  (alternatives: :log, :uniform)
+  exploit_hours_monotonicity    = true
+  labor history 1 dimension nS1 = 1
+  labor history 1 bounds        = [0.0000, 0.0000]
+  labor history 1 grid method   = :quantile  (alternatives: :linear, :quantile)
+  labor history 2 dimension nS2 = 1
+  labor history 2 bounds        = [0.0000, 0.0000]
+  labor history 2 grid method   = :quantile  (alternatives: :linear, :quantile)
+  qSav                          = 0.9723466284755885
+  qBorr                         = 1.0123473140001613
+  theta0 (implied)              = 1.000000
+  alpha                         = 0.000000
+  mu1, mu2                      = 0.000000, 0.000000
+  hours exponent (1-tau)*theta0 = 0.819000
+  s_hours_floor                 = 0.0500
+  terminal_borrowing            = :zero
+  lambda_solver                 = :brent  (Roots.jl; fallback: grid search over 15 values)
+  lambda_bracket                = [0.200000, 2.500000], tol = 1.00e-06
+  collect_distributions         = true
+
+lambda = 0.20000000: residual = 2.43494281e-01
+lambda = 2.50000000: residual = -4.55143079e-01
+lambda = 1.00161308: residual = 2.91283744e-04
+lambda = 1.00257256: residual = 6.55467005e-07
+lambda = 1.00257472: residual = 5.54305035e-09
+lambda = 1.00257474: residual = 3.91563823e-12
+lambda = 1.00257474: residual = -1.11022302e-18
+total solve time          = 120.378 seconds
+
+=== Final history-dependent equilibrium ===
+lambda                     = 1.00257474
+government budget residual = -1.11022302e-18
+PV output                  = 30.42153046
+PV consumption             = 30.42153046
+mean output                = 0.91488130
+mean consumption           = 0.92054855
+terminal assets            = 0.00000000
+qSav                       = 0.9723466284755885
+qBorr                      = 1.0123473140001613
+bbar                       = -0.17014842731387517
+theta0 (implied)           = 1.00000000
+s' clamped mass share      = 0.000e+00
+solve time                 = 120.378 seconds
+
+=== Aggregate statistics ===
+mean assets / mean labor income          = 0.56295722
+median assets / mean labor income        = 0.23975192
+true borrowing limit / mean labor income = 0.18005110
+grid borrowing limit / mean labor income = 0.17041705
+share negative liquid assets             = 0.23714382
+share at effective grid borrowing bound  = 0.12676681
+share with zero assets                   = 0.02500116
+share at upper asset bound               = 0.00000436
+share at hours upper bound               = 0.00000000
+
+=== Welfare ===
+overall value function utility = **-0.3541315461**
+overall simulation utility     = -0.3541310246
+overall difference             = 5.21553193e-07
+kappa      prob        value function  simulation     difference
+-0.600954  0.16666667  -0.7172039338  -0.7172037368   1.97007976e-07
+-0.050500  0.66666667  -0.3541318381  -0.3541312716   5.66490779e-07
+ 0.499954  0.16666667   0.0089420094   0.0089426758   6.66348063e-07
+
+=== Upper-bound warning ===
+asset upper bound binding: bound = 15.00000000, material max a' = 15.00000000, slack = 0.00000000e+00
+
+# mu2 from optimal hd
+
+run_history_dependent_tax(mu1 = 0, mu2 = 0.8343, alpha = 0, tau = 0.181, nA = 101, nEps = 11, nZ=15, nKappa = 3, nS2 = 101, s_grid_method = :quantile, labor_grid_size=151);
+
+=== History-dependent tax finite-horizon solver ===
+Options:
+  age dimension J               = 39
+  shock grid dimension nZ       = 15
+  shock grid dimension nEps     = 11
+  shock grid dimension nKappa   = 3
+  z_discretization_method       = :rouwenhorst  (alternatives: :rouwenhorst, :tauchen)
+  asset grid dimension nA       = 101
+  asset grid bounds             = [-1.179095, 15.000000]
+  asset grid method             = :nonuniform  (alternatives: :nonuniform, :linear)
+  bbar                          = -0.17014842731387517
+  labor grid size               = 151 on [0.0500, 5.0000]
+  labor grid spacing            = :log  (alternatives: :log, :uniform)
+  exploit_hours_monotonicity    = true
+  labor history 1 dimension nS1 = 1
+  labor history 1 bounds        = [0.0000, 0.0000]
+  labor history 1 grid method   = :quantile  (alternatives: :linear, :quantile)
+  labor history 2 dimension nS2 = 101
+  labor history 2 bounds        = [-35.3070, 25.3797]
+  labor history 2 grid method   = :quantile  (alternatives: :linear, :quantile)
+  qSav                          = 0.9723466284755885
+  qBorr                         = 1.0123473140001613
+  theta0 (implied)              = 0.199100
+  alpha                         = 0.000000
+  mu1, mu2                      = 0.000000, 0.834300
+  hours exponent (1-tau)*theta0 = 0.163063
+  s_hours_floor                 = 0.0500
+  terminal_borrowing            = :zero
+  lambda_solver                 = :brent  (Roots.jl; fallback: grid search over 15 values)
+  lambda_bracket                = [0.200000, 2.500000], tol = 1.00e-06
+  collect_distributions         = true
+
+lambda = 0.20000000: residual = 2.33576512e-01
+lambda = 2.50000000: residual = -4.28766604e-01
+lambda = 1.01109921: residual = -1.13566840e-03
+lambda = 1.00717466: residual = -1.02661890e-05
+lambda = 1.00713886: residual = 3.13653532e-07
+lambda = 1.00713992: residual = 9.35186203e-09
+lambda = 1.00713995: residual = 4.60501157e-11
+lambda = 1.00713995: residual = 2.70336531e-14
+lambda = 1.00715731: residual = -4.93373532e-06
+lambda = 1.00714863: residual = -2.44615550e-06
+lambda = 1.00714429: residual = -1.19962616e-06
+lambda = 1.00714212: residual = -6.22025609e-07
+lambda = 1.00714104: residual = -3.11854524e-07
+lambda = 1.00714050: residual = -1.55096088e-07
+total solve time          = 37599.006 seconds
+
+=== Final history-dependent equilibrium ===
+lambda                     = 1.00713995
+government budget residual = 2.70336531e-14
+PV output                  = 28.90341040
+PV consumption             = 28.90341040
+mean output                = 0.86548608
+mean consumption           = 0.86686076
+terminal assets            = 0.00000000
+qSav                       = 0.9723466284755885
+qBorr                      = 1.0123473140001613
+bbar                       = -0.17014842731387517
+theta0 (implied)           = 0.19909972
+s' clamped mass share      = 0.000e+00
+solve time                 = 37599.006 seconds
+
+=== Aggregate statistics ===
+mean assets / mean labor income          = -0.00164274
+median assets / mean labor income        = -0.14444295
+true borrowing limit / mean labor income = 0.19032701
+grid borrowing limit / mean labor income = 0.18014313
+share negative liquid assets             = 0.75114215
+share at effective grid borrowing bound  = 0.65153966
+share with zero assets                   = 0.02501470
+share at upper asset bound               = 0.00000148
+share at hours upper bound               = 0.00000000
+
+=== Welfare ===
+overall value function utility = **-0.3548166528**
+overall simulation utility     = -0.3548166517
+overall difference             = 1.10792331e-09
+kappa      prob        value function  simulation     difference
+-0.600954  0.16666667  -0.6963358793  -0.6963358775   1.78664661e-09
+-0.050500  0.66666667  -0.3561599017  -0.3561599006   1.12627868e-09
+ 0.499954  0.16666667  -0.0079244307  -0.0079244303   3.55778696e-10
+
+=== Upper-bound warning ===
+asset upper bound binding: bound = 15.00000000, material max a' = 15.00000000, slack = 0.00000000e+00
+

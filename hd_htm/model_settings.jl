@@ -164,6 +164,23 @@ const HD_SETTINGS = (;
     # model is.
     s_grid_method = :linear,
 
+    # Asset-market access (psmodel.tex: s and h). pSS = Pr(stay saver),
+    # pHH = Pr(stay hand-to-mouth); piH = (1-pSS)/(2-pSS-pHH) is the stationary
+    # hand-to-mouth share, printed in the summary, and the initial
+    # cross-section is drawn from it.
+    #
+    # CALIBRATED TO KAPLAN, VIOLANTE AND WEIDNER (2014) TABLE 4, matching
+    # hi_htm, hiinf_htm and hdinf_htm: the SCF 2007-2009 two-year transition
+    # matrix collapsed to two states and annualized, giving piH = 0.3166 and an
+    # expected hand-to-mouth spell of 4.15 years. See
+    # references/KVW2014_WealthyHandToMouth/ and
+    # paper/notes/DOT_AccessChainAnnualization.tex.
+    #
+    #     pSS = 1.00, pHH = 0.00 -> piH = 0   reproduces `hd` exactly
+    #     pSS = 0.00, pHH = 1.00 -> piH = 1   everyone hand-to-mouth
+    pSS = 0.8882970895,
+    pHH = 0.7589294614,
+
     # lambda solver
     lambdaMin = 0.20,
     lambdaMax = 2.50,
