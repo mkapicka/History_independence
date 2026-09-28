@@ -1,3 +1,13 @@
+# =============================================================================
+# run_history_dependent_tax.jl
+#
+# Entry point for the history-dependent tax model. Builds a parameter set from
+# HD_SETTINGS, solves it, prints the summary, and saves or reloads results.
+# Also parses key=value command-line overrides for script use.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 using JLD2
 using Printf
 
@@ -9,24 +19,13 @@ using .HistoryDependentTax
 """
     run_history_dependent_tax(; kwargs...)
 
-Solve the history-dependent tax model and print the equilibrium summary.
-`kwargs` override `HD_SETTINGS` (e.g.
-`run_history_dependent_tax(nA = 41, J = 4, mu1 = 0.0)`).
-
-Returns a NamedTuple `(; eq, params)` where `eq` is the equilibrium and
-`params` is the `HDParams` used. The history-independent limit
-`mu1 = mu2 = 0` (with `nS1 = nS2 = 1`) is handled by this solver directly;
-`check_history_independent_limit()` runs it with the standard consistency
-checks.
+Solve the model and print the equilibrium summary. `kwargs` override
+HD_SETTINGS. Returns `(; eq, params)`. The history-independent limit
+`mu1 = mu2 = 0` with `nS1 = nS2 = 1` is handled by this solver directly.
 """
 function run_history_dependent_tax(; kwargs...)
-    # collect_distributions defaults to TRUE here: an interactive run is
-    # normally headed for the plotting layer, whose hours and consumption
-    # histograms read the per-observation vectors and come back empty without
-    # them. It sits BEFORE the splat, so `kwargs` can still turn it off -- which
-    # is what the calibration drivers and the sweeps do, and must do: those
-    # vectors are three Float64 per (age, state) per kappa, the allocation that
-    # OOM-kills large jobs.
+    # collect_distributions is on by default here and off in the calibration
+    # drivers and the sweeps, where the per-observation vectors are too large.
     p = make_history_dependent_params(; collect_distributions = true, kwargs...)
 
     eq = solve_history_dependent_tax(p)
@@ -39,12 +38,9 @@ end
 """
     save_hd_result(result; dir = joinpath(@__DIR__, "results"))
 
-Save a `run_history_dependent_tax()` result to `dir` under a filename built
-from the model dimensions (shell-safe: no spaces or commas), e.g.
-`result_mu1=0.300_mu2=0.050_J=39_nA=101_nS1=7_nS2=7_nZ=5_nEps=5_nKappa=3.jld2`.
-Overwrites an existing file of the same name. Returns the saved path.
-Reload with `load_hd_result(path)` (after including this file, so the
-`HistoryDependentTax` module needed to reconstruct `HDParams` is defined).
+Save a result to `dir` under a name built from the model dimensions. Overwrites
+an existing file of the same name and returns the saved path. Reload with
+`load_hd_result` after including this file, so `HDParams` is defined.
 """
 function save_hd_result(result; dir = joinpath(@__DIR__, "results"))
     mkpath(dir)
@@ -69,15 +65,12 @@ function load_hd_result(path::AbstractString)
     return (; eq = data["eq"], params = data["params"])
 end
 
-# Script entry point: `julia -t 3 run_history_dependent_tax.jl` still works;
-# from the REPL, include this file and call `result = run_history_dependent_tax()`.
 """
     parse_cli_value(s)
 
-Convert one command-line token to the type the solver expects. A leading colon
-gives a `Symbol` (`:quantile`), `true`/`false` a `Bool`, then `Int` is tried
-before `Float64`, and anything left over stays a `String`. Int before Float
-matters: `nA=101` must be an `Int`, while `mu2=0.8343` must not be.
+Convert one command-line token to the type the solver expects: Symbol for a
+leading colon, then Bool, Int, Float64, else String. Int is tried before Float64
+so that `nA=101` is an Int and `mu2=0.8343` is not.
 """
 function parse_cli_value(s::AbstractString)
     startswith(s, ":") && return Symbol(s[2:end])
@@ -91,11 +84,9 @@ end
 """
     parse_cli_kwargs(args)
 
-Turn `["mu1=0", "mu2=0.8343", "s_grid_method=:quantile"]` into a NamedTuple
-suitable for splatting into `run_history_dependent_tax` or `sweep_mu2`, so a
-command line can carry any override the REPL call can. Unknown keys are not
-checked here -- they fail at `HDParams` with an unsupported-keyword error, which
-names the offending key.
+Turn `["mu1=0", "mu2=0.8343"]` into a NamedTuple for splatting into
+`run_history_dependent_tax` or `sweep_mu2`. Unknown keys fail at `HDParams`,
+which names the offending key.
 """
 function parse_cli_kwargs(args)
     pairs = Pair{Symbol,Any}[]
@@ -108,10 +99,11 @@ function parse_cli_kwargs(args)
     return (; pairs...)
 end
 
-# Script entry point. Every keyword the REPL call accepts works here too:
-#   julia -t 8 run_history_dependent_tax.jl mu1=0 mu2=0.8343 alpha=0 nS2=101 \
-#         s_grid_method=:quantile labor_grid_size=151
-# The result is saved to results/ under a name built from the dimensions.
+# -----------------------------------------------------------------------------
+# SCRIPT ENTRY POINT
+# -----------------------------------------------------------------------------
+# Every keyword the REPL call accepts works here too:
+#   julia -t 8 run_history_dependent_tax.jl mu1=0 mu2=0.8343 nS2=101
 if abspath(PROGRAM_FILE) == abspath(@__FILE__)
     result = run_history_dependent_tax(; parse_cli_kwargs(ARGS)...)
     @printf("saved to %s\n", save_hd_result(result))

@@ -1,53 +1,39 @@
 # =============================================================================
 # plot_welfare.jl
 #
-# Overlays the Bewley (with-savings) mu2 sweep on the no-savings one-root
-# welfare curve, so the two models can be read off one axis.
+# Overlays the Bewley mu2 sweep on the no-savings one-root welfare curve, so
+# the two models can be read off one axis: the one-root curve and the
+# unrestricted two-root optimum from ../../sweep_noasset.jl, and the Bewley
+# sweep from join_results.jl. Each curve's optimum is a dot in its own colour.
 #
-#   blue   no savings, one root      100*(W(mu) - W_hi)      <- from ../../sweep_noasset.jl
-#   red -- no savings, unrestricted two-root optimum
-#   red    Bewley hd sweep           100*(W .- W[1])         <- from join_results.jl
-#
-# Each curve's optimum is a large dot in that curve's colour, labelled in place
-# with the root rather than in the legend.
-#
-# ---------------------------------------------------------------------------
-# RUNNING IT: the two halves live in different environments
-# ---------------------------------------------------------------------------
-# The no-savings code needs Optim and PyPlot (code/julia/Project.toml); this
-# folder needs JLD2 to read the sweep files (Bewley/hd/Project.toml). Neither
-# environment has both, so STACK them rather than adding dependencies to
-# either -- Julia searches LOAD_PATH in order:
+# -----------------------------------------------------------------------------
+# RUNNING IT
+# -----------------------------------------------------------------------------
+# The two halves live in different environments -- the no-savings code needs
+# Optim and PyPlot, this folder needs JLD2 -- so stack them on LOAD_PATH:
 #
 #   cd .../code/julia/Bewley/hd
 #   JULIA_LOAD_PATH="../..:.:@stdlib" julia -e 'include("plot_welfare.jl"); plot_welfare()'
 #
-# `../..` is code/julia (Optim, PyPlot), `.` is this folder (JLD2, Plots).
-# Nothing is installed and no Project.toml changes.
-#
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # THE TWO CURVES DO NOT SHARE A BASELINE
-# ---------------------------------------------------------------------------
-# The no-savings curve is a gain over HISTORY INDEPENDENCE: it is anchored at
-# zero because mu = 0 collapses the one-root kernel to theta = (1,0,0,...) and
-# P = 1 exactly, so the benchmark is a genuine model, not a normalization.
+# -----------------------------------------------------------------------------
+# The no-savings curve is a gain over history independence, anchored at zero
+# because mu = 0 collapses the kernel to theta = (1,0,...). The Bewley curve is
+# a gain over the first point of its own grid, which coincides with history
+# independence only when the sweep starts at mu2 = 0. plot_welfare prints the
+# first mu2 and warns when it is not zero.
 #
-# The Bewley curve is `100*(W .- W[1])`, a gain over the FIRST POINT OF ITS OWN
-# GRID. That coincides with history independence only if the sweep starts at
-# mu2 = 0. The meta3 sweeps start at mu2 = 0.4, in which case the green curve is
-# anchored at an arbitrary interior point and its height is not comparable with
-# the blue one -- only its SHAPE is. `plot_welfare` prints the first mu2 so this
-# is visible rather than silent, and warns when it is not zero.
+# Marek Kapicka, 2026
 # =============================================================================
 
 isdefined(@__MODULE__, :oneroot_welfare_curve) || include("../../sweep_noasset.jl")
 
 using Printf
 
-# join_results.jl assigns mu2, W and A at top level, so it must be included
-# HERE rather than inside plot_welfare: an `include` in function scope does not
-# leave those names visible to the caller. It globs `results/` relative to the
-# working directory, so run this from the hd folder.
+# Included at top level, not inside plot_welfare: an `include` in function
+# scope would not leave mu2, W and A visible to the caller. It globs `results/`
+# relative to the working directory, so run this from the hd folder.
 include("join_results.jl")
 
 """
@@ -55,15 +41,8 @@ include("join_results.jl")
                  mulo = 0.0, muhi = 0.999, save = true)
 
 Draw both welfare curves against the root. Returns
-`(; mu_ns, gain_ns, mu2_hd, gain_hd, opt, W_two)`.
-
-`tau` defaults to the wedge the Bewley sweep used (`HD_SETTINGS.tau` is 0.181),
-so the no-savings curve is drawn at the same progressivity. Pass a number to
-override.
-
-Reads the Bewley sweep through `join_results.jl` in this folder, which globs
-`results/sweep_mu2_n=1_*nS2=151*.jld2`. Point that file elsewhere if your
-results live in a subdirectory.
+`(; mu_ns, gain_ns, mu2_hd, gain_hd, opt, W_two)`. `tau` defaults to the wedge
+the Bewley sweep used, so both curves are drawn at the same progressivity.
 """
 function plot_welfare(; npoints::Int = 300, tau = nothing, lambda::Symbol = :opt,
                       mulo = 0.0, muhi = 0.999, save::Bool = true)
@@ -85,18 +64,15 @@ function plot_welfare(; npoints::Int = 300, tau = nothing, lambda::Symbol = :opt
     s   = solveHistDep(p, p.Kmax)
     W_two = Wfun(p, w.tau, s.P)
 
-    # Optimum of the Bewley curve: the best point ON THE GRID, since that curve
-    # is 46 solved points rather than a closed form. Its resolution is the mu2
-    # spacing, unlike the no-savings optimum which is refined by Brent.
+    # Best point ON THE GRID: this curve is solved points, not a closed form,
+    # so its resolution is the mu2 spacing.
     ihd = argmax(gain_hd)
     mu_hd_opt, gain_hd_opt = mu2_hd[ihd], gain_hd[ihd]
 
     # ---- figure ------------------------------------------------------------
     figure(figsize = (8, 5.5))
-    # Drawn FIRST so it heads the legend: matplotlib orders entries by the
-    # order artists are added, and the unrestricted optimum is the ceiling the
-    # other two curves are read against. Grey rather than red, since the Bewley
-    # line is red and two red objects meaning different things would confuse.
+    # Drawn first so it heads the legend, which matplotlib orders by the order
+    # artists are added. Grey, since the Bewley line is already red.
     axhline(100 * (W_two - w.W_hi); color = MyDarkGrey, linestyle = "--",
             linewidth = 1.3, zorder = 1,
             label = "no savings, unrestricted (two roots)")
@@ -106,9 +82,8 @@ function plot_welfare(; npoints::Int = 300, tau = nothing, lambda::Symbol = :opt
          label = "Bewley (savings)")
     axhline(0.0; color = MyDarkGrey, linewidth = 0.8, zorder = 0)
 
-    # Both optima: a large dot in the colour of its own line, labelled in place
-    # with the root. "_nolegend_" keeps them out of the legend, which otherwise
-    # carries five entries for three curves.
+    # A dot in the colour of its own line, labelled in place with the root;
+    # "_nolegend_" keeps the two dots out of the legend.
     for (mu_o, g_o, col) in ((opt.mu, 100 * w.gain, MyBlue),
                              (mu_hd_opt, gain_hd_opt, MyRed))
         plot([mu_o], [g_o]; color = col, marker = "o", markersize = 11,
@@ -118,11 +93,8 @@ function plot_welfare(; npoints::Int = 300, tau = nothing, lambda::Symbol = :opt
                  fontsize = "medium", ha = "right", zorder = 6)
     end
 
-    # Legend in the north-west, in the empty band between the dashed two-root
-    # reference (2.98%) and the blue curve, which is still below 1.8% over the
-    # left half of the axis. A small headroom keeps the box clear of the dashed
-    # line; `figstyle` has no anchor argument, so the legend is placed here
-    # rather than through it.
+    # Placed here rather than through `figstyle`, which has no anchor
+    # argument. The headroom keeps the box clear of the dashed line.
     ylo, yhi = ylim()
     ylim(ylo, yhi + 0.08 * (yhi - ylo))
     figstyle(xlab = L"root $\mu$", ylab = "welfare gain (%)", showlegend = false)
