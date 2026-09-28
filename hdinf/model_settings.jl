@@ -1,20 +1,16 @@
-# Settings for the history-dependent tax model. This file is loaded INSIDE the
-# HistoryDependentTax module by solve_history_dependent_tax.jl and is fully
-# standalone: it does not reference the history-independent SETTINGS. Edit the
-# values here to change the model, grids, or solver; after editing, re-include
-# solve_history_dependent_tax.jl (the module is replaced, with a harmless
-# warning).
+# =============================================================================
+# model_settings.jl
 #
-# HD_SETTINGS is the SINGLE source of truth: the HDParams constructor has no
-# defaults for these keywords, so removing an entry here fails fast with an
-# UndefKeywordError rather than falling back to a stale duplicate.
+# Settings for the history-dependent tax model. Loaded INSIDE the
+# HistoryDependentTax module by solve_history_dependent_tax.jl and standalone:
+# it does not reference the history-independent SETTINGS. After editing,
+# re-include solve_history_dependent_tax.jl.
 #
-# alpha IS set here and is free. Two forms are accepted:
-#   alpha = <number>   used exactly as given, whatever the roots are;
-#   alpha = :paper     the paper mixture (rho - mu1)/(mu2 - mu1), 1 if mu1 = mu2.
-# A number does NOT track the roots, so it goes stale if you edit mu1 or mu2;
-# :paper stays consistent with them. Use a number when alpha is an object of
-# study, :paper when the roots are meant to be the optimal ones.
+# HD_SETTINGS is the single source of truth: HDParams has no defaults for these
+# keywords, so a missing entry raises UndefKeywordError rather than falling
+# back to a stale duplicate. theta0 is NOT a setting; it is derived from
+# (alpha, mu1, mu2, beta, J) by the finite-horizon normalization, and adding it
+# back raises a MethodError.
 #
 # theta0 is NOT set here. It is derived from (alpha, mu1, mu2, beta) by
 #   theta0 = 1 / ( alpha/(1-beta*mu1) + (1-alpha)/(1-beta*mu2) ),
@@ -22,11 +18,13 @@
 # no-savings code. Adding theta0 back as a setting is a MethodError, not a
 # silent override.
 #
-# NOTE ON THE ROOTS. alpha lands in [0, 1] iff mu1 <= rho <= mu2, i.e. the
-# roots BRACKET the income persistence rho = 0.958. An alpha outside [0, 1]
-# still solves but gives a signed mixture and a warning.
+# Marek Kapicka, 2026
+# =============================================================================
+
 const HD_SETTINGS = (;
-    # preferences and tax level
+    # ---------------------------------------------------------------------
+    # PREFERENCES AND TAX LEVEL
+    # ---------------------------------------------------------------------
     beta = 0.96,
     eta = 2.0,
     phi = 1.0,
@@ -91,27 +89,17 @@ const HD_SETTINGS = (;
     # age0_real = 21, stats_age_lo = 2, stats_age_hi = 39 is the same real
     # window with birth at 21.
 
-    # Initial asset holdings at model age 1. a0 = 0.0 reproduces the original
-    # "born with nothing" condition exactly; a0_scales_with_kappa reads a0 as a
+
+    # Initial assets at model age 1; a0_scales_with_kappa reads a0 as a
     # multiplier on exp(kappa), matching how wages and the borrowing limit
     # already scale with the permanent type.
     a0 = 0.0,
     a0_scales_with_kappa = false,
-    # CALIBRATION WINDOW. Model age is the 1-based array index, so
-    # real age = age0_real + model age - 1. With age0_real = 20 the window
-    # model ages 3-40 is REAL AGES 22-59, which is the cross-section Kaplan
-    # and Violante (2014) Table 2 build the 0.588 mean-liquid-wealth target on
-    # (2001 SCF, households aged 22-59, top 5% by net worth dropped). Model
-    # ages 1-2 are real ages 20-21, excluded: the data moment starts at 22.
-    #
-    # These three move together. Changing age0_real without changing the
-    # window silently shifts which real ages are averaged.
-    #
-    # NOTE for the FINITE solvers (hi, hi_htm, hd): stats_age_hi = 40 equals
-    # J + 1 at J = 39, so the window now reaches the TERMINAL age, where
-    # a' >= 0 replaces the borrowing limit. That age contributes to the asset
-    # and income means but not to the borrowing-limit averages, which divide
-    # by borrowing_limit_mass and so still cover j = 0,...,J-1 only.
+    # Statistics window, in model ages (the 1-based array index):
+    # real age = age0_real + model age - 1, so 3-40 here is real 22-59.
+    # The three move together. At J = 39 the window reaches the terminal age,
+    # which enters the asset and income means but not the borrowing-limit
+    # averages. See NOTES.md for the data moment behind the window.
     age0_real = 20,
     stats_age_lo = 3,
     stats_age_hi = 40,
@@ -120,7 +108,9 @@ const HD_SETTINGS = (;
     howardSteps = 40,
     tolDist = 1e-10,
 
-    # shocks
+    # ---------------------------------------------------------------------
+    # SHOCKS
+    # ---------------------------------------------------------------------
     rho = 0.958,
     sigma_omega = sqrt(0.017),
     sigma_epsilon = sqrt(0.081),
@@ -130,7 +120,9 @@ const HD_SETTINGS = (;
     nKappa = 3,
     z_discretization_method = :rouwenhorst,
 
-    # asset grid
+    # ---------------------------------------------------------------------
+    # ASSET GRID AND ASSET CHOICE
+    # ---------------------------------------------------------------------
     bbar = -0.17014842731387517,
     aMax = 15.0,
     nA = 101,
@@ -141,63 +133,50 @@ const HD_SETTINGS = (;
     asset_grid_zero_share = 0.30,
     asset_grid_zero_width = 0.08,
 
-    # financial and government
+    # ---------------------------------------------------------------------
+    # PRICES AND GOVERNMENT
+    # ---------------------------------------------------------------------
     qBorr = 1.0123473140001613,
     qSav = 0.9723466284755885,
     qGov = 0.99,
     G = 0.0,
 
-    # labor: hours are chosen on this grid (the joint (a', h) search is the
-    # only option here, since hours move s' and the static labor FOC is
-    # invalid). The grid is LOG-SPACED (uniform in ln h), which matches the
-    # model: s' depends on ln h, and income/disutility are power functions,
-    # so relative hours resolution is what matters. hMin = 0.05 (not 1e-8)
-    # keeps ln(hMin) finite-scaled and, together with s_hours_floor,
-    # guarantees every realizable s' lies inside the s-grids.
-    #
-    # labor_grid_size drives the discretization error in hours: adjacent
-    # points differ by a factor of 1.122 at 41 points but only 1.047 at 101.
-    # Measured at mu1 = mu2 = 0 against the history-independent solver, whose
-    # continuous labor FOC gives mean assets / mean labor income = 0.58750135
-    # at these prices (nA = 101, J = 39):
-    #     nH =  41  ->  0.60017143  (+2.16%),  10s
-    #     nH = 101  ->  0.59306286  (+0.95%),  20s
-    #     nH = 161  ->  0.58814079  (+0.11%),  26s
-    #     nH = 321  ->  0.58782189  (+0.05%),  43s
-    # Convergence alternates in sign rather than decaying monotonically, as
-    # grid-rounding error does. Raise to 161 if the residual percent matters.
-    # The 41-point default predated the Topkis acceleration of the hours
-    # scan, which now prunes most of the extra work.
+    # ---------------------------------------------------------------------
+    # LABOR
+    # ---------------------------------------------------------------------
+    # Hours are chosen on a grid: the joint (a', h) search is the only option
+    # here, since hours move s' and the static labor FOC is invalid. The grid
+    # is log-spaced, which matches a model where s' depends on ln h and income
+    # and disutility are power functions. hMin = 0.05 keeps ln(hMin)
+    # finite-scaled and, with s_hours_floor, keeps every realizable s' inside
+    # the s-grids. labor_grid_size drives the hours discretization error; see
+    # NOTES.md for the measured convergence.
     hMin = 0.05,
     hMax = 5.0,
     labor_grid_size = 101,
     labor_grid_spacing = :log,
 
-    # rigorous acceleration of the hours scan (Topkis monotonicity of the
-    # optimal hours index in current assets, per asset choice); set false
-    # only to cross-check against the unaccelerated scan
+    # Topkis monotonicity of the optimal hours index in current assets; set
+    # false only to cross-check against the unaccelerated scan.
     exploit_hours_monotonicity = true,
 
-    # past-income stock grids; s_hours_floor is used only for the s-grid
-    # bounds (NOT a constraint on hours): bounds use
-    # ln h in [log(s_hours_floor), log(hMax)]
+    # ---------------------------------------------------------------------
+    # PAST-INCOME STOCK GRIDS
+    # ---------------------------------------------------------------------
+    # s_hours_floor sets the s-grid bounds only and is not a constraint on
+    # hours: bounds use ln h in [log(s_hours_floor), log(hMax)].
     nS1 = 7,
     nS2 = 7,
     s_hours_floor = 0.05,
 
-    # spacing of the s1/s2 grids inside their (reachable) bounds:
-    #   :linear    equally spaced;
-    #   :quantile  placed at quantiles of the age-pooled stock distribution,
-    #              which is normal in closed form (s_stock_moments) because the
-    #              no-savings model is jointly lognormal with closed-form hours.
-    # The stock distribution is concentrated well inside the reachable range, so
-    # equal spacing wastes points on tails the model rarely visits. :quantile is
-    # a PLACEMENT heuristic only -- the endpoints still span the reachable range,
-    # so it changes how efficiently the grid resolves the model, never what the
-    # model is.
+    # Spacing inside the reachable bounds: :linear equally spaced, or
+    # :quantile at quantiles of the age-pooled stock distribution. A placement
+    # heuristic only -- the endpoints span the reachable range either way.
     s_grid_method = :linear,
 
-    # lambda solver
+    # ---------------------------------------------------------------------
+    # LAMBDA SOLVER
+    # ---------------------------------------------------------------------
     lambdaMin = 0.20,
     lambdaMax = 2.50,
     nLambdaSearch = 15,
@@ -205,7 +184,9 @@ const HD_SETTINGS = (;
     tolLambda = 1e-6,
     tolGovBudget = 1e-6,
 
-    # output
+    # ---------------------------------------------------------------------
+    # OUTPUT
+    # ---------------------------------------------------------------------
     verbose = true,
     massTol = 1e-14,
     collect_distributions = true,

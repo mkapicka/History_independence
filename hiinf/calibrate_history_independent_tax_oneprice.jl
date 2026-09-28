@@ -88,6 +88,7 @@
 #
 # Returns `(; q, bbar, eq, moments, residuals, converged, sweeps, nSolves,
 #            elapsedSeconds, calib, params)`.
+# Marek Kapicka, 2026
 # =============================================================================
 
 # Reuses `solve_scalar`, `moments_from` and the solver entry points from the
@@ -272,8 +273,7 @@ function calibrate_history_independent_tax_oneprice(;
         converged = gap <= calib.moment_tol
     end
 
-    # Equilibrium at the calibrated point, re-solved with the caller's
-    # verbosity so the full solver log follows the search.
+    # Re-solved at the calibrated point with the caller's verbosity.
     p_final = make_history_independent_params(;
         base_kwargs..., qSav = x[1], qBorr = x[1], qGov = x[1], bbar = x[2])
     eq = solve_history_independent_tax(p_final)

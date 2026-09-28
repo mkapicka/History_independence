@@ -1,4 +1,12 @@
-# Plotting utilities for results returned by run_history_dependent_tax().
+# =============================================================================
+# plot_history_dependent_tax.jl
+#
+# Plotting utilities for results returned by run_history_dependent_tax():
+# age profiles, asset and hours distributions, and figure saving.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 using Plots
 using StatsBase
 

@@ -1,3 +1,12 @@
+# =============================================================================
+# recover_ratios.jl
+#
+# Recovers the ratio statistics from sweep files that stored levels only.
+# For the infinite-horizon history-dependent tax model.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 using JLD2, Printf
 
 # =============================================================================

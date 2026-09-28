@@ -1,3 +1,13 @@
+# =============================================================================
+# solve_history_independent_tax.jl
+#
+# Solver: backward induction for the policies, a forward pass for the
+# cross-section and its statistics, and a Brent solve for the tax level.
+# For the history-independent tax model with hand-to-mouth agents.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 using LinearAlgebra
 using Printf
 using Statistics
@@ -116,29 +126,18 @@ Base.@kwdef struct HIParams
     # Ages j = 0,...,J are stored in length-(J+1) vectors at index j+1.
     J::Int
 
-    # MODEL AGE is the 1-based array index, so model age 1 is j = 0, the first
-    # simulated period, at real age `age0_real`; real age = age0_real + j.
-    #
-    # Cross-sectional statistics are averaged over model ages stats_age_lo to
-    # stats_age_hi INCLUSIVE rather than over the whole life. The calibration
-    # target is Kaplan-Violante (2014) Table 2, built on a 2001 SCF
-    # cross-section of households aged 22-59, so with age0_real = 22 that
-    # window is model ages 1-38. `stats_age_hi = 0` in SETTINGS is resolved to
-    # J+1 by `hi_params`, which covers every age and is the pre-window
-    # behaviour; the equilibrium reports BOTH the window and the all-ages
-    # version, so the effect of restricting it is visible rather than implied.
+    # Model age is the 1-based array index: model age 1 is j = 0, at real age
+    # age0_real. Statistics are averaged over model ages stats_age_lo to
+    # stats_age_hi inclusive; `stats_age_hi = 0` is resolved to J+1 by
+    # `hi_params`. The equilibrium reports both the window and all ages.
     age0_real::Int
     stats_age_lo::Int
     stats_age_hi::Int
 
-    # Initial asset holdings at model age 1 (j = 0). a0 = 0.0 is the original
-    # condition -- everyone born with nothing -- and remains the default, so
-    # results are unchanged unless it is set. a0_scales_with_kappa multiplies
-    # a0 by exp(kappa), matching how wages and the borrowing limit
-    # (-bbar*exp(kappa + rho*z)) already scale with the permanent type: a flat
-    # a0 would otherwise leave the lowest-kappa household starting relatively
-    # far richer. a0 is placed on the grid by the same Young lottery used for
-    # a', not snapped to the nearest node, so it stays exact between points.
+    # Initial assets at model age 1. a0_scales_with_kappa multiplies a0 by
+    # exp(kappa), as wages and the borrowing limit already scale with the
+    # permanent type. Placed on the grid by the same Young lottery used for a',
+    # not snapped to the nearest node.
     a0::Float64
     a0_scales_with_kappa::Bool
 
@@ -209,7 +208,9 @@ Base.@kwdef struct HIParams
     h_grid_income_power::Vector{Float64} = h_grid .^ (1.0 - tau)
     h_grid_disutility::Vector{Float64} = phi .* (h_grid .^ (1.0 + eta)) ./ (1.0 + eta)
 
-    # lambda solver.
+    # ---------------------------------------------------------------------
+    # LAMBDA SOLVER
+    # ---------------------------------------------------------------------.
     lambdaMin::Float64
     lambdaMax::Float64
     nLambdaSearch::Int
@@ -1407,13 +1408,9 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                 Y[age] += weighted_mass * y
                 A[age] += weighted_mass * ap
 
-                # Three age coverages from one body: `stats` is the
-                # calibration window, `stats_all` every age, and `stats_lo` the
-                # single age at which the window opens -- the cross-section AS
-                # IT ENTERS the window, which the window itself cannot show.
-                # Each keeps its own total_mass, the denominator every share
-                # and mean divides by, which is why the gate wraps the whole
-                # call rather than parts of it.
+                # Three age coverages from one body: the calibration window,
+                # every age, and the single entry age. Each keeps its own
+                # total_mass, so the gate wraps the whole call.
                 accumulate_stats!(stats_all, weighted_mass, ia, a, ap, h, c, y,
                                   true_borrowing_limit, effective_borrowing_limit,
                                   at_borrowing_constraint, at_asset_upper,
@@ -1560,11 +1557,11 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
 
     stats = finalize_statistics(stats_acc, p)
     stats_all = finalize_statistics(stats_all_acc, p)
-    # The entry-age cross-section, reduced with the same machinery so it cannot
-    # drift from the windowed one. Only the two asset RATIOS are carried over,
-    # and both divide by the WINDOW's mean labor income -- the same denominator
-    # `medianAssetsToMeanLaborIncome` uses, so they are comparable to the
-    # calibration targets rather than to a one-age income no target is built on.
+    # The entry-age cross-section, reduced with the same machinery. Only the
+    # two asset ratios are carried over, both divided by the WINDOW's mean
+    # ---------------------------------------------------------------------
+    # LABOR
+    # --------------------------------------------------------------------- income so they are comparable to the calibration targets.
     stats_lo = finalize_statistics(stats_lo_acc, p)
     stats = merge(stats, (;
         meanAssetsAtStatsAgeLoToMeanLaborIncome =
@@ -1605,12 +1602,7 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
     # Mid-cumulative interpolation rather than StatsBase's weighted-quantile
     # convention, which is biased low on a coarse nonuniform grid holding a
     # discretized continuous distribution. See `interpolated_weighted_quantile`
-    # in common/grids.jl for the measured comparison against a known median:
-    # at nA = 151 StatsBase errs by 5.8% of the median and refinement does not
-    # close the gap. Measured on this solver's own distribution at J = 39,
-    # nA = 101, the two conventions differ by 4.6%, against a calibration
-    # target of 0.0498. The infinite-horizon solvers have used this since they
-    # were written; this brings the finite pair into line.
+    # in common/grids.jl, and NOTES.md for the measured comparison.
     median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_mass, 0.5)
     # Both limits exist only at ages j = 0,...,J-1, so they are averaged over
     # the mass of those ages rather than over the whole population.

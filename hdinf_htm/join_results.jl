@@ -1,3 +1,13 @@
+# =============================================================================
+# join_results.jl
+#
+# Merges the per-point sweep files and reports the moments in the units
+# the calibration targets.
+# For the infinite-horizon history-dependent tax model with hand-to-mouth agents.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 using JLD2, Printf
 
 # =============================================================================

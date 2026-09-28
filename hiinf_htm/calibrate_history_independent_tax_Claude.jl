@@ -7,58 +7,32 @@
 #     qBorr  (gross borrowing price, a' <  0)
 #     bbar   (borrowing-limit scale, bbar <= 0)
 #
-# so that the stationary cross-section produced by
-# `solve_history_independent_tax` matches three data moments:
+# so that the cross-section produced by solve_history_independent_tax matches
+# three data moments, read off eq.statistics:
 #
-#     (i)   mean assets / mean labor income             = 0.588
-#           (or median / mean labor income = 0.0498 when asset_moment = :median)
-#     (ii)  true borrowing limit / mean labor income     = 0.185
-#     (iii) share of households with negative liquid      = 0.260
-#           assets
+#     (i)   mean (or median) assets / mean labor income
+#     (ii)  true borrowing limit / mean labor income
+#     (iii) share of households with negative liquid assets
 #
-# These map onto the statistics returned by `finalize_statistics` as
-#
-#     (i)   eq.statistics.meanAssetsToMeanLaborIncome   (default), or
-#           eq.statistics.medianAssetsToMeanLaborIncome (asset_moment = :median)
-#     (ii)  eq.statistics.meanBorrowingLimitToMeanLaborIncome, which averages
-#           -bbar*exp(kappa+rho*z) over ages j = 0,...,J-1; the terminal age is
-#           excluded because a' >= 0 is imposed there and no limit is defined
-#     (iii) eq.statistics.shareNegativeLiquidAssets
-#
-# The `solve_*` file is used unmodified; this file only wraps it.
+# The solver is used unmodified; this file only wraps it.
 #
 # -----------------------------------------------------------------------------
-# Identification logic
+# IDENTIFICATION
 # -----------------------------------------------------------------------------
-# The mapping (qSav, qBorr, bbar) -> (moment_i, moment_ii, moment_iii) is
-# coupled, but it has a strong near-triangular structure that we exploit:
+# The mapping (qSav, qBorr, bbar) -> (i, ii, iii) is coupled but near
+# triangular, which the search exploits:
 #
-#   * bbar  is the *only* parameter entering the "true" borrowing limit
-#     numerator  -bbar * E[exp(kappa + rho*z)]  (see `true_borrowing_limit`
-#     in simulate_kappa!, averaged over ages j = 0,...,J-1).  It therefore
-#     pins down moment (ii) almost mechanically, with only a second-order
-#     feedback through mean labor income.  -> bbar solves (ii).
+#   bbar  enters the borrowing-limit numerator alone, so it pins (ii) almost
+#         mechanically, with only second-order feedback through labor income.
+#   qSav  governs the return to saving, hence the asset distribution -> (i).
+#   qBorr governs the cost of borrowing, hence the negative share -> (iii).
 #
-#   * qSav  governs the return to saving and hence the right tail / median of
-#     the asset distribution.  -> qSav solves (i).
+# Each instrument is moved by a 1-D bracketed root find holding the others
+# fixed, sweeping the three blocks until the joint residual clears tolerance.
+# Every residual evaluation rebuilds HIParams, because the asset grid's lower
+# bound depends on bbar, and calls the solver with output suppressed.
 #
-#   * qBorr governs the cost of borrowing and hence how many households choose
-#     a' < 0.  -> qBorr solves (iii).
-#
-# We solve this with an outer block-Gauss-Seidel / nested-bisection scheme:
-# each instrument is moved by a 1-D bracketed root finder (Roots.Brent, already
-# a dependency of the solver) holding the others fixed, and we sweep the three
-# blocks until the joint residual is below tolerance.  Each residual evaluation
-# rebuilds HIParams (because the asset grid's lower bound depends on bbar) and
-# calls the unmodified solver with verbose output suppressed.
-#
-# References for this calibration strategy in heterogeneous-agent models:
-#   * Kaplan, Moll & Violante (2018, AER) -- two-asset HANK; liquid-asset
-#     targets (median liquid wealth, share of hand-to-mouth / negative liquid
-#     positions) calibrated to SCF.
-#   * Guvenen, Karahan, Ozkan & Song (2021, Ecta) -- moment-matching of
-#     earnings-driven wealth statistics.
-#   * Standard SMM/just-identified GMM logic: 3 instruments, 3 moments.
+# Marek Kapicka, 2026
 # =============================================================================
 
 using Dates
@@ -107,16 +81,9 @@ Earlier versions carried three speed controls, all since removed:
   * reuse of the cached final equilibrium: saved one solve in ~130.
 """
 Base.@kwdef struct CalibrationParams
-    # Targets: data moments to match (only the asset_moment-selected ratio
-    # among the first two is targeted; the other is reported but left free).
-    # Sources: (i) and (ii) are Kaplan and Violante (2014), Table III, a 2001
-    # SCF cross-section of households aged 22-59 with the top 5% by net worth
-    # dropped -- net LIQUID wealth over mean earnings-plus-benefits, mean
-    # 31,001/52,745 = 0.588 and median 2,629/52,745 = 0.0498. (The median read
-    # 0.043 until 2026-09-23, from a 2,269 transposition of the 2,629 in that
-    # table; every other figure in the row matches.) (iii) is the same paper,
-    # p. 1221, where the borrowing rate is set so that 26% of agents hold
-    # negative liquid balances.
+    # Targets. Only the asset_moment-selected ratio among the first two is
+    # targeted; the other is reported but left free. All three come from
+    # Kaplan and Violante (2014); see NOTES.md for the table and the figures.
     medianAssetsToMeanLaborIncome::Float64       = 0.0498  # (i), asset_moment = :median
     meanAssetsToMeanLaborIncome::Float64         = 0.588   # (i), asset_moment = :mean
     trueBorrowingLimitToMeanLaborIncome::Float64 = 0.185   # (ii)
@@ -164,13 +131,13 @@ Base.@kwdef struct CalibrationParams
     outer_max_sweeps::Int = 12
     moment_tol::Float64   = 5e-4
 
-    # Pass-through solver verbosity (the *inner* model solves are silenced
-    # regardless; this only controls the calibration's own logging).
+    # The inner model solves are silenced regardless; this controls only the
+    # calibration's own logging.
     verbose::Bool = true
 end
 
-# Moment (i) reads the same field name out of the achieved moments and out of
-# the calibration parameters, so one field selector serves both.
+# One selector serves both the achieved moments and the targets, which share
+# the field name.
 asset_field(c::CalibrationParams) =
     c.asset_moment === :median ? :medianAssetsToMeanLaborIncome :
                                  :meanAssetsToMeanLaborIncome
@@ -210,12 +177,10 @@ max_abs_resid(m, t) = max(abs(resid_i(m, t)),
 # -----------------------------------------------------------------------------
 # A robust 1-D bracketed solver wrapper
 # -----------------------------------------------------------------------------
-# `f` is monotone in the relevant region but may be flat (step-like) because
-# the asset choice lives on a discrete grid. We therefore:
-#   1. probe the supplied bracket endpoints,
-#   2. if they do not straddle zero, expand/scan the interval,
-#   3. fall back to returning the endpoint with the smallest |residual| when no
-#      sign change exists (the moment is then as close as the grid allows).
+# `f` is monotone in the relevant region but steps, because the asset choice
+# lives on a discrete grid. So: probe the bracket endpoints, scan the interval
+# if they do not straddle zero, and fall back to the endpoint with the smallest
+# residual when no sign change exists.
 """
     solve_scalar(f, lo, hi; xtol, maxevals, nscan)
 
@@ -269,13 +234,9 @@ end
 # -----------------------------------------------------------------------------
 # Main calibration routine
 # -----------------------------------------------------------------------------
-# The three blocks, in sweep order. `i` indexes the instrument vector
-# x = [qSav, qBorr, bbar]; `lo`/`hi` name the bracket fields of
-# CalibrationParams; `resid` is the moment residual that instrument zeroes.
-#   bbar  -> (ii): more negative bbar raises -bbar*E[exp(kappa+rho z)], so the
-#            residual is increasing in -bbar, i.e. decreasing in bbar.
-#   qSav  -> (i):  higher qSav => cheaper saving => higher assets.
-#   qBorr -> (iii):higher qBorr => cheaper borrowing => larger negative share.
+# The three blocks, in sweep order. `i` indexes x = [qSav, qBorr, bbar],
+# `lo`/`hi` name the bracket fields, `resid` is the moment that instrument
+# zeroes: bbar -> (ii), qSav -> (i), qBorr -> (iii).
 const BLOCKS = (
     (i = 3, lo = :bbar_min,  hi = :bbar_max,  resid = resid_ii),
     (i = 1, lo = :qSav_min,  hi = :qSav_max,  resid = resid_i),
@@ -327,9 +288,8 @@ function calibrate_history_independent_tax(;
          clamp(calib.qBorr_init, calib.qBorr_min, calib.qBorr_max),
          clamp(calib.bbar_init,  calib.bbar_min,  calib.bbar_max)]
 
-    # Every moment evaluation is a full model solve, so memoize on the
-    # instrument triple: Brent re-probes bracket endpoints, and the sweep-end
-    # evaluation repeats the point the last block just solved.
+    # Every evaluation is a full model solve, so memoize on the instrument
+    # triple: Brent re-probes endpoints and the sweep end repeats a point.
     cache = Dict{NTuple{3,Float64},Any}()
     n_solves = Ref(0)
 
@@ -407,8 +367,7 @@ function calibrate_history_independent_tax(;
         converged = gap <= calib.moment_tol
     end
 
-    # Equilibrium at the calibrated point, re-solved with the caller's
-    # verbosity so the full solver log follows the search.
+    # Re-solved at the calibrated point with the caller's verbosity.
     p_final = make_history_independent_params(;
         base_kwargs..., qSav = x[1], qBorr = x[2], bbar = x[3])
     eq = solve_history_independent_tax(p_final)

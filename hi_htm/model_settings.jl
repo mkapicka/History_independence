@@ -1,45 +1,30 @@
-# User settings. Edit this tuple to change the model, grids, or solver.
+# =============================================================================
+# model_settings.jl
 #
-# This is the single source of truth: `HIParams` in
-# `solve_history_independent_tax.jl` carries no defaults of its own for these
-# parameters, so a value can only be changed here or by an explicit override
-# passed to `make_history_independent_params`.
+# User settings for the history-independent tax model. Edit this tuple to
+# change the model, the grids, or the solver. It is the single source of
+# truth: HIParams carries no defaults of its own, so a value can only be set
+# here or by an explicit override to make_history_independent_params.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 const SETTINGS = (;
-    # dimensions
+    # ---------------------------------------------------------------------
+    # DIMENSIONS AND AGES
+    # ---------------------------------------------------------------------
     J = 39,
 
-    # Households are born at real age 22, which is model age 1 (model age is
-    # the 1-based array index, so real age = age0_real + model age - 1).
-    #
-    # Cross-sectional statistics are averaged over MODEL ages stats_age_lo to
-    # stats_age_hi inclusive. Kaplan-Violante (2014) Table 2 build the 0.588
-    # target on a 2001 SCF cross-section of households aged 22-59, which with
-    # age0_real = 22 is model ages 1-38. stats_age_hi = 0 means "through the
-    # last age" and is resolved to J+1 by `hi_params`; that covers every age
-    # and reproduces the behaviour from before the window existed, which is
-    # why it is the default here. Set 1 and 38 to match the data moment.
-    # Initial asset holdings at model age 1. a0 = 0.0 reproduces the original
-    # "born with nothing" condition exactly. Set a0_scales_with_kappa = true to
-    # read a0 as a multiplier on exp(kappa), matching how wages and the
-    # borrowing limit already scale with the permanent type.
+    # Initial assets at model age 1. Set a0_scales_with_kappa to read a0 as a
+    # multiplier on exp(kappa), as wages and the borrowing limit already are.
     a0 = 0.0,
     a0_scales_with_kappa = false,
 
-    # CALIBRATION WINDOW. Model age is the 1-based array index, so
-    # real age = age0_real + model age - 1. With age0_real = 20 the window
-    # model ages 3-40 is REAL AGES 22-59, which is the cross-section Kaplan
-    # and Violante (2014) Table 2 build the 0.588 mean-liquid-wealth target on
-    # (2001 SCF, households aged 22-59, top 5% by net worth dropped). Model
-    # ages 1-2 are real ages 20-21, excluded: the data moment starts at 22.
-    #
-    # These three move together. Changing age0_real without changing the
-    # window silently shifts which real ages are averaged.
-    #
-    # NOTE for the FINITE solvers (hi, hi_htm, hd): stats_age_hi = 40 equals
-    # J + 1 at J = 39, so the window now reaches the TERMINAL age, where
-    # a' >= 0 replaces the borrowing limit. That age contributes to the asset
-    # and income means but not to the borrowing-limit averages, which divide
-    # by borrowing_limit_mass and so still cover j = 0,...,J-1 only.
+    # Statistics window, in model ages (the 1-based array index):
+    # real age = age0_real + model age - 1, so 3-40 here is real 22-59.
+    # The three move together. At J = 39 the window reaches the terminal age,
+    # which enters the asset and income means but not the borrowing-limit
+    # averages. See NOTES.md for the data moment behind the window.
     age0_real = 20,
     stats_age_lo = 3,
     stats_age_hi = 40,
@@ -48,7 +33,9 @@ const SETTINGS = (;
     nKappa = 3,
     nA = 101,
 
-    # preferences and tax
+    # ---------------------------------------------------------------------
+    # PREFERENCES AND TAX
+    # ---------------------------------------------------------------------
     beta = 0.960,
     eta = 2.0,
     phi = 1.0,
@@ -74,7 +61,9 @@ const SETTINGS = (;
     pSS = 0.8882970895,
     pHH = 0.7589294614,
 
-    # shocks
+    # ---------------------------------------------------------------------
+    # SHOCKS
+    # ---------------------------------------------------------------------
     rho = 0.958,
     sigma_omega = sqrt(0.017),
     sigma_epsilon = sqrt(0.081),
@@ -83,7 +72,9 @@ const SETTINGS = (;
     tauchen_width = 3.0,
     z_initial = 0.0,
 
-    # asset grid
+    # ---------------------------------------------------------------------
+    # ASSET GRID AND ASSET CHOICE
+    # ---------------------------------------------------------------------
     asset_grid_method = :nonuniform,
     asset_grid_borrow_share = 0.35,
     asset_grid_curvature_borrow = 1.8,
@@ -101,29 +92,37 @@ const SETTINGS = (;
     asset_choice_tol = 1e-8,
     asset_choice_max_iter = 50,
 
-    # financial and government
+    # ---------------------------------------------------------------------
+    # PRICES AND GOVERNMENT
+    # ---------------------------------------------------------------------
     qBorr = 0.97,
     qSav = 0.99,
     qGov = 0.99,
     G = 0.0,
 
-    # labor
+    # ---------------------------------------------------------------------
+    # LABOR
+    # ---------------------------------------------------------------------
     hMin = 1e-8,
     hMax = 5.0,
     labor_solver = :hybrid_newton,
     labor_grid_size = 151,
 
-    # lambda solver
+    # ---------------------------------------------------------------------
+    # LAMBDA SOLVER
+    # ---------------------------------------------------------------------
     lambdaMin = 0.20,
     lambdaMax = 2.50,
     nLambdaSearch = 15,
     maxIterLambda = 60,
-    # The residual is a step function of lambda on the discrete a'-grid;
-    # tighter tolerances can ask Brent to resolve jumps with no grid support.
+    # The residual steps on the discrete a'-grid, so tighter tolerances ask
+    # Brent to resolve jumps with no grid support.
     tolGovBudget = 1e-5,
     tolLambda = 1e-5,
 
-    # output
+    # ---------------------------------------------------------------------
+    # OUTPUT
+    # ---------------------------------------------------------------------
     verbose = true,
     printEveryLambda = 1,
     massTol = 1e-14,

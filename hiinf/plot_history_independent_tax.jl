@@ -1,3 +1,13 @@
+# =============================================================================
+# plot_history_independent_tax.jl
+#
+# Plotting utilities: age profiles, asset and hours distributions, and
+# figure saving.
+# For the infinite-horizon history-independent tax model.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 using Plots
 using Printf
 using StatsBase
@@ -76,8 +86,7 @@ function age_grid_for_series(result, series)
     return collect(1:length(series))
 end
 
-# One row per age-profile panel. Add a row to add a panel: it is picked up by
-# the plotting, saving, and path-reporting code below.
+# One row per age-profile panel; adding a row adds a panel everywhere below.
 const AGE_FIGURES = (
     (key = :averageAssetsByAge, field = :A,
      ylabel = "Average assets", title = "Average assets by age",
@@ -177,7 +186,7 @@ function save_history_independent_figures(result; output_dir = joinpath(@__DIR__
     )
 end
 
-# Label for each entry of `save_history_independent_figures`, in print order.
+# Label for each saved figure, in print order.
 const FIGURE_LABELS = (;
     assetGrid          = "asset grid",
     averageAssetsByAge = "average assets by age",

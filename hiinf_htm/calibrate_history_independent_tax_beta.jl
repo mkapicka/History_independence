@@ -145,6 +145,7 @@
 #
 # Returns `(; beta, bbar, qSav, qBorr, qGov, eq, moments, residuals, converged,
 #            stalled, sweeps, nSolves, elapsedSeconds, calib, params)`.
+# Marek Kapicka, 2026
 # =============================================================================
 
 # Reuses `solve_scalar`, `moments_from` and the solver entry points from the
@@ -438,8 +439,7 @@ function calibrate_history_independent_tax_beta(;
         end
     end
 
-    # Equilibrium at the calibrated point, re-solved with the caller's
-    # verbosity so the full solver log follows the search.
+    # Re-solved at the calibrated point with the caller's verbosity.
     # collect_distributions defaults to FALSE for the calibration, including
     # this final re-solve: nothing the calibration targets reads the
     # per-observation vectors -- the asset histogram behind the median is a

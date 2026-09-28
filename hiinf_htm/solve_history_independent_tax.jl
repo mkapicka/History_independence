@@ -1,3 +1,13 @@
+# =============================================================================
+# solve_history_independent_tax.jl
+#
+# Solver: backward induction for the policies, a forward pass for the
+# cross-section and its statistics, and a Brent solve for the tax level.
+# For the infinite-horizon history-independent tax model with hand-to-mouth agents.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 using LinearAlgebra
 using Printf
 using Statistics
@@ -246,7 +256,9 @@ Base.@kwdef struct HIParams
     h_grid_income_power::Vector{Float64} = h_grid .^ (1.0 - tau)
     h_grid_disutility::Vector{Float64} = phi .* (h_grid .^ (1.0 + eta)) ./ (1.0 + eta)
 
-    # lambda solver.
+    # ---------------------------------------------------------------------
+    # LAMBDA SOLVER
+    # ---------------------------------------------------------------------.
     lambdaMin::Float64
     lambdaMax::Float64
     nLambdaSearch::Int
@@ -1883,11 +1895,11 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
 
     stats = finalize_statistics(stats_acc, p)
     stats_all = finalize_statistics(stats_all_acc, p)
-    # The entry-age cross-section, reduced with the same machinery so it cannot
-    # drift from the windowed one. Only the two asset RATIOS are carried over,
-    # and both divide by the WINDOW's mean labor income -- the same denominator
-    # `medianAssetsToMeanLaborIncome` uses, so they are comparable to the
-    # calibration targets rather than to a one-age income no target is built on.
+    # The entry-age cross-section, reduced with the same machinery. Only the
+    # two asset ratios are carried over, both divided by the WINDOW's mean
+    # ---------------------------------------------------------------------
+    # LABOR
+    # --------------------------------------------------------------------- income so they are comparable to the calibration targets.
     stats_lo = finalize_statistics(stats_lo_acc, p)
     stats = merge(stats, (;
         meanAssetsAtStatsAgeLoToMeanLaborIncome =

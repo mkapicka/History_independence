@@ -1,3 +1,13 @@
+# =============================================================================
+# run_history_dependent_tax.jl
+#
+# Entry point: builds a parameter set from the settings, solves it,
+# prints the summary, and saves or reloads results.
+# For the infinite-horizon history-dependent tax model.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 using JLD2
 using Printf
 
@@ -20,13 +30,8 @@ Returns a NamedTuple `(; eq, params)` where `eq` is the equilibrium and
 checks.
 """
 function run_history_dependent_tax(; kwargs...)
-    # collect_distributions defaults to TRUE here: an interactive run is
-    # normally headed for the plotting layer, whose hours and consumption
-    # histograms read the per-observation vectors and come back empty without
-    # them. It sits BEFORE the splat, so `kwargs` can still turn it off -- which
-    # is what the calibration drivers and the sweeps do, and must do: those
-    # vectors are three Float64 per (age, state) per kappa, the allocation that
-    # OOM-kills large jobs.
+    # collect_distributions is on by default here and off in the calibration
+    # drivers and the sweeps, where the per-observation vectors are too large.
     p = make_history_dependent_params(; collect_distributions = true, kwargs...)
 
     eq = solve_history_dependent_tax(p)
@@ -69,8 +74,7 @@ function load_hd_result(path::AbstractString)
     return (; eq = data["eq"], params = data["params"])
 end
 
-# Script entry point: `julia -t 3 run_history_dependent_tax.jl` still works;
-# from the REPL, include this file and call `result = run_history_dependent_tax()`.
+
 """
     parse_cli_value(s)
 
@@ -108,10 +112,11 @@ function parse_cli_kwargs(args)
     return (; pairs...)
 end
 
-# Script entry point. Every keyword the REPL call accepts works here too:
-#   julia -t 8 run_history_dependent_tax.jl mu1=0 mu2=0.8343 alpha=0 nS2=101 \
-#         s_grid_method=:quantile labor_grid_size=151
-# The result is saved to results/ under a name built from the dimensions.
+# -----------------------------------------------------------------------------
+# SCRIPT ENTRY POINT
+# -----------------------------------------------------------------------------
+# Every keyword the REPL call accepts works here too:
+#   julia -t 8 run_history_dependent_tax.jl mu1=0 mu2=0.8343 nS2=101
 if abspath(PROGRAM_FILE) == abspath(@__FILE__)
     result = run_history_dependent_tax(; parse_cli_kwargs(ARGS)...)
     @printf("saved to %s\n", save_hd_result(result))

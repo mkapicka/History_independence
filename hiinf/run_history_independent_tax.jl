@@ -1,3 +1,13 @@
+# =============================================================================
+# run_history_independent_tax.jl
+#
+# Entry point: builds a parameter set from the settings, solves it,
+# prints the summary, and saves or reloads results.
+# For the infinite-horizon history-independent tax model.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 using JLD2
 using Printf
 
@@ -16,13 +26,8 @@ Returns a NamedTuple `(; eq, params)` where `eq` is the equilibrium
 and `params` is the `HIParams` used.
 """
 function run_history_independent_tax(; kwargs...)
-    # collect_distributions defaults to TRUE here: an interactive run is
-    # normally headed for the plotting layer, whose hours and consumption
-    # histograms read the per-observation vectors and come back empty without
-    # them. It sits BEFORE the splat, so `kwargs` can still turn it off -- which
-    # is what the calibration drivers and the sweeps do, and must do: those
-    # vectors are three Float64 per (age, state) per kappa, the allocation that
-    # OOM-kills large jobs.
+    # collect_distributions is on by default here and off in the calibration
+    # drivers and the sweeps, where the per-observation vectors are too large.
     p = make_history_independent_params(; collect_distributions = true, kwargs...)
 
     eq = solve_history_independent_tax(p)

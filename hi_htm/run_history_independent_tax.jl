@@ -1,3 +1,13 @@
+# =============================================================================
+# run_history_independent_tax.jl
+#
+# Entry point: builds a parameter set from the settings, solves it,
+# prints the summary, and saves or reloads results.
+# For the history-independent tax model with hand-to-mouth agents.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
 using JLD2
 using Printf
 
