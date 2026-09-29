@@ -57,6 +57,13 @@ using QuantEcon
 using Roots
 using StatsBase
 
+# -----------------------------------------------------------------------------
+# Shared infrastructure. `using` rather than include, so the methods land in
+# this module's scope. It must precede the HDParams declaration below, which
+# subtypes AbstractBewleyParams.
+# -----------------------------------------------------------------------------
+using BewleyCommon
+
 export HDParams, HD_SETTINGS, make_history_dependent_params,
        solve_history_dependent_tax, print_hd_equilibrium_summary,
        check_history_independent_limit
@@ -102,7 +109,7 @@ DERIVED and cannot be set: it follows from the finite-horizon restriction
 The asset choice is always grid search and hours are always chosen on the labor
 grid (the static labor FOC is invalid because hours move s').
 """
-struct HDParams
+struct HDParams <: AbstractBewleyParams
     # ---------------------------------------------------------------------
     # PREFERENCES AND TAX
     # ---------------------------------------------------------------------
@@ -447,12 +454,6 @@ economic content.
 """
 const S_GRID_UNIFORM_BLEND = 0.30
 
-# -----------------------------------------------------------------------------
-# Shared infrastructure. Included rather than imported, so the methods land in
-# THIS module's scope exactly as when they were written out inline here.
-# -----------------------------------------------------------------------------
-using BewleyCommon
-
 
 """
     s_stock_moments(mu, J; alpha, mu1, mu2, theta0, beta, rho, tau, eta,
@@ -747,12 +748,6 @@ function merge_stats!(dest::StatsAccumulator, src::StatsAccumulator)
 end
 
 upper_bound_share_tol() = 1e-8
-upper_bound_level_tol(bound::Real) = 1e-8 * max(1.0, abs(Float64(bound)))
-asset_upper_bound(p::HDParams) = maximum(p.a_grid)
-hours_upper_bound(p::HDParams) = p.hMax
-safe_ratio(num::Real, den::Real) =
-    abs(den) > eps(Float64) ? Float64(num) / Float64(den) : NaN
-
 function finalize_statistics(stats::StatsAccumulator, p::HDParams)
     total_mass = stats.total_mass
     mean_assets = stats.sum_current_assets / total_mass
@@ -861,22 +856,6 @@ function precompute_income_bases(kappa::Float64, p::HDParams)
         wage_base[iz, ie] = exp(log_wage)
     end
     return tax_base, wage_base
-end
-
-asset_price(ap::Real, p::HDParams) = ap < 0.0 ? p.qBorr : p.qSav
-asset_prices(p::HDParams) = [asset_price(ap, p) for ap in p.a_grid]
-
-function first_feasible_asset_indices(kappa::Float64, p::HDParams)
-    nZ = length(p.z_grid)
-    idx = Vector{Int}(undef, nZ)
-    for iz in 1:nZ
-        lower = p.bbar * exp(kappa + p.rho * p.z_grid[iz])
-        idx[iz] = searchsortedfirst(p.a_grid, lower - 1e-12)
-        if idx[iz] > length(p.a_grid)
-            error("No feasible next-period asset for kappa=$kappa, z=$(p.z_grid[iz])")
-        end
-    end
-    return idx
 end
 
 function first_nonnegative_asset_index(p::HDParams)
@@ -1483,7 +1462,7 @@ function simulate_kappa!(C, H, Y, A, stats::StatsAccumulator,
             binding_age = age < nAge
             lower_idx = binding_age ? first_ap[iz] : terminal_first_ap
             true_borrowing_limit = binding_age ?
-                -p.bbar * exp(kappa + p.rho * p.z_grid[iz]) : 0.0
+                -borrowing_limit(kappa, iz, p) : 0.0
             effective_borrowing_limit = binding_age ? -p.a_grid[lower_idx] : 0.0
             m_base = kappa + p.z_grid[iz] + p.eps_grid[ie]
 

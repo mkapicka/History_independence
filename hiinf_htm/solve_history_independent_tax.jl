@@ -124,7 +124,7 @@ Every model parameter is a field with no hard-coded default, so `SETTINGS` in
 when supplying a complete parameter set explicitly. Fields whose default is an
 expression are derived from the fields above them.
 """
-Base.@kwdef struct HIParams
+Base.@kwdef struct HIParams <: AbstractBewleyParams
     # Preferences and tax.
     beta::Float64
     eta::Float64
@@ -260,7 +260,7 @@ Base.@kwdef struct HIParams
     hMax::Float64
     labor_grid_size::Int
     labor_solver::Symbol
-    h_grid::Vector{Float64} = build_labor_grid(hMin, hMax, labor_grid_size)
+    h_grid::Vector{Float64} = uniform_labor_grid(hMin, hMax, labor_grid_size)
     h_grid_income_power::Vector{Float64} = h_grid .^ (1.0 - tau)
     h_grid_disutility::Vector{Float64} = phi .* (h_grid .^ (1.0 + eta)) ./ (1.0 + eta)
 
@@ -1687,7 +1687,7 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                 # all mass counts towards the reported means -- the finite
                 # solver has to exclude its terminal age, where a' >= 0 stands
                 # in for the limit.
-                true_borrowing_limit = -p.bbar * exp(kappa + p.rho * p.z_grid[iz])
+                true_borrowing_limit = -borrowing_limit(kappa, iz, p)
                 effective_borrowing_limit = -lower_ap
                 u_by_age[age] += mass * u
 
@@ -2015,12 +2015,6 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
 end
 
 const UPPER_BOUND_SHARE_TOL = 1e-8
-upper_bound_level_tol(bound::Real) = 1e-8 * max(1.0, abs(Float64(bound)))
-asset_upper_bound(p::HIParams) = maximum(p.a_grid)
-hours_upper_bound(p::HIParams) = p.hMax
-
-safe_ratio(num::Real, den::Real) = abs(den) > eps(Float64) ? Float64(num) / Float64(den) : NaN
-
 function compute_expected_value!(EV, Vnext, p::HIParams)
     nA = length(p.a_grid)
     nZ = length(p.z_grid)
@@ -2047,163 +2041,6 @@ function compute_expected_value!(EV, Vnext, p::HIParams)
     return EV
 end
 
-function optimal_labor_foc(cash::Float64, income_coeff::Float64, p::HIParams)
-    tau = p.tau
-    h_low = p.hMin
-    h_high = p.hMax
-
-    if income_coeff <= 0.0
-        if cash <= 0.0
-            return -Inf, NaN
-        end
-        h = h_low
-        c = cash
-        return log(c) - p.phi * h^(1.0 + p.eta) / (1.0 + p.eta), h
-    end
-
-    if cash + income_coeff * h_high^(1.0 - tau) <= 0.0
-        return -Inf, NaN
-    end
-
-    if cash + income_coeff * h_low^(1.0 - tau) <= 0.0
-        h_low = ((-cash / income_coeff) * (1.0 + 1e-12))^(1.0 / (1.0 - tau))
-        h_low = min(max(h_low, p.hMin), h_high)
-        if cash + income_coeff * h_low^(1.0 - tau) <= 0.0
-            h_low = nextfloat(h_low)
-        end
-    end
-
-    if p.labor_solver == :grid
-        return optimal_labor_grid(h_low, h_high, cash, income_coeff, p)
-    end
-
-    d_low = labor_foc_residual(h_low, cash, income_coeff, p)
-    d_high = labor_foc_residual(h_high, cash, income_coeff, p)
-
-    if d_low <= 0.0
-        h = h_low
-    elseif d_high >= 0.0
-        h = h_high
-    else
-        h = solve_labor_root(h_low, h_high, cash, income_coeff, p)
-    end
-
-    c = cash + income_coeff * h^(1.0 - tau)
-    if c <= 0.0
-        return -Inf, NaN
-    end
-    u = log(c) - p.phi * h^(1.0 + p.eta) / (1.0 + p.eta)
-    return u, h
-end
-
-function solve_labor_root(h_low::Float64, h_high::Float64, cash::Float64,
-                          income_coeff::Float64, p::HIParams)
-    if p.labor_solver == :brent
-        f(h) = labor_foc_residual(h, cash, income_coeff, p)
-        return Roots.find_zero(f, (h_low, h_high), Roots.Brent())
-    elseif p.labor_solver == :hybrid_newton
-        return labor_root_hybrid_newton(h_low, h_high, cash, income_coeff, p)
-    end
-    error("Unknown labor_solver = $(p.labor_solver)")
-end
-
-function optimal_labor_grid(h_low::Float64, h_high::Float64, cash::Float64,
-                            income_coeff::Float64, p::HIParams)
-    first_h = searchsortedfirst(p.h_grid, h_low - 1e-12)
-    best_u = -Inf
-    best_h = NaN
-
-    @inbounds for ih in first_h:length(p.h_grid)
-        h = p.h_grid[ih]
-        if h > h_high + 1e-12
-            break
-        end
-
-        c = cash + income_coeff * p.h_grid_income_power[ih]
-        if c <= 0.0
-            continue
-        end
-
-        u = log(c) - p.h_grid_disutility[ih]
-        if u > best_u
-            best_u = u
-            best_h = h
-        end
-    end
-
-    if !isfinite(best_u)
-        return -Inf, NaN
-    end
-    return best_u, best_h
-end
-
-function labor_root_hybrid_newton(h_low::Float64, h_high::Float64, cash::Float64,
-                                  income_coeff::Float64, p::HIParams)
-    lo = h_low
-    hi = h_high
-    h = 0.5 * (lo + hi)
-
-    for _ in 1:50
-        f = labor_foc_residual(h, cash, income_coeff, p)
-        if abs(f) <= 1e-12
-            return h
-        end
-
-        if f > 0.0
-            lo = h
-        else
-            hi = h
-        end
-
-        fp = labor_foc_residual_derivative(h, cash, income_coeff, p)
-        h_newton = h - f / fp
-        if isfinite(h_newton) && lo < h_newton < hi
-            h = h_newton
-        else
-            h = 0.5 * (lo + hi)
-        end
-
-        if hi - lo <= 1e-12 * max(1.0, abs(h))
-            return 0.5 * (lo + hi)
-        end
-    end
-
-    return 0.5 * (lo + hi)
-end
-
-function labor_foc_residual(h::Float64, cash::Float64, income_coeff::Float64, p::HIParams)
-    c = cash + income_coeff * h^(1.0 - p.tau)
-    if c <= 0.0
-        return Inf
-    end
-    return income_coeff * (1.0 - p.tau) - p.phi * h^(p.eta + p.tau) * c
-end
-
-function labor_foc_residual_derivative(h::Float64, cash::Float64,
-                                       income_coeff::Float64, p::HIParams)
-    c = cash + income_coeff * h^(1.0 - p.tau)
-    if c <= 0.0
-        return -Inf
-    end
-    return -p.phi * (
-        (p.eta + p.tau) * h^(p.eta + p.tau - 1.0) * c +
-        income_coeff * (1.0 - p.tau) * h^(p.eta)
-    )
-end
-
-function first_feasible_asset_indices(kappa::Float64, p::HIParams)
-    nZ = length(p.z_grid)
-    idx = Vector{Int}(undef, nZ)
-    for iz in 1:nZ
-        lower = p.bbar * exp(kappa + p.rho * p.z_grid[iz])
-        idx[iz] = searchsortedfirst(p.a_grid, lower - 1e-12)
-        if idx[iz] > length(p.a_grid)
-            error("No feasible next-period asset for kappa=$kappa, z=$(p.z_grid[iz])")
-        end
-    end
-    return idx
-end
-
 function first_nonnegative_asset_index(p::HIParams)
     idx = searchsortedfirst(p.a_grid, -1e-12)
     while idx <= length(p.a_grid) && p.a_grid[idx] < -1e-12
@@ -2213,55 +2050,10 @@ function first_nonnegative_asset_index(p::HIParams)
     return idx
 end
 
-function build_labor_grid(hMin::Float64, hMax::Float64, labor_grid_size::Int)
-    hMin > 0.0 || error("hMin must be positive")
-    hMax > hMin || error("hMax must exceed hMin")
-    labor_grid_size >= 2 || error("labor_grid_size must be at least 2")
-    return collect(range(hMin, hMax, length = labor_grid_size))
-end
-
-function normalize_labor_grid(h_grid, hMin::Float64, hMax::Float64)
-    grid = sort(unique(collect(Float64.(h_grid))))
-    all(h -> hMin - 1e-12 <= h <= hMax + 1e-12, grid) ||
-        error("h_grid entries must lie inside [hMin, hMax]")
-    return sort(unique(vcat(hMin, grid, hMax)))
-end
-
-asset_price(ap::Real, p::HIParams) = ap < 0.0 ? p.qBorr : p.qSav
-asset_prices(p::HIParams) = [asset_price(ap, p) for ap in p.a_grid]
-
 # Infinite horizon: the borrowing limit binds at every age. The finite solver
 # replaces it with a' >= 0 at the terminal age; there is no terminal age here.
 function asset_choice_lower_bound(kappa::Float64, iz::Int, p::HIParams)
-    return p.bbar * exp(kappa + p.rho * p.z_grid[iz])
-end
-
-asset_choice_bound_tol(bound::Real, p::HIParams) =
-    max(1e-10, p.asset_choice_tol * max(1.0, abs(Float64(bound))))
-
-function asset_transition_weights(ap::Float64, p::HIParams)
-    grid = p.a_grid
-    nA = length(grid)
-
-    if ap <= grid[1]
-        return 1, 1, 0.0
-    elseif ap >= grid[nA]
-        return nA, nA, 0.0
-    end
-
-    hi = searchsortedfirst(grid, ap)
-    if hi <= nA && abs(ap - grid[hi]) <= asset_choice_bound_tol(grid[hi], p)
-        return hi, hi, 0.0
-    end
-
-    lo = hi - 1
-    weight_hi = (ap - grid[lo]) / (grid[hi] - grid[lo])
-    return lo, hi, weight_hi
-end
-
-function nearest_asset_index(ap::Float64, p::HIParams)
-    lo, hi, weight_hi = asset_transition_weights(ap, p)
-    return weight_hi <= 0.5 ? lo : hi
+    return borrowing_limit(kappa, iz, p)
 end
 
 function precompute_income_bases(kappa::Float64, p::HIParams)
@@ -2304,20 +2096,4 @@ ar1_initial_probabilities(z_initial::Float64, z_grid::Vector{Float64}, rho::Floa
     normalize_probabilities(
         ar1_conditional_probabilities(z_initial, z_grid, rho, innovation_mean, innovation_sd),
         "z0_probs")
-
-
-"""
-    default_asset_grid(bbar, aMax, nA, rho, kappa_grid, z_grid; grid options...)
-
-Asset grid spanning the loosest borrowing limit `min_{kappa,z} bbar*exp(kappa +
-rho*z)` up to `aMax`.
-"""
-function default_asset_grid(bbar::Float64, aMax::Float64, nA::Int, rho::Float64,
-                            kappa_grid::Vector{Float64}, z_grid::Vector{Float64};
-                            kwargs...)
-    bbar <= 0.0 ||
-        error("Use bbar <= 0. For a borrowing limit B > 0, pass bbar = -B.")
-    amin = minimum(bbar * exp(kappa + rho * z) for kappa in kappa_grid for z in z_grid)
-    return asset_grid_with_zero(amin, aMax, nA; kwargs...)
-end
 

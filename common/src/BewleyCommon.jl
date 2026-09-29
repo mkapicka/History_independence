@@ -26,10 +26,18 @@ using QuantEcon
 using Roots
 using StatsBase
 
+include("params.jl")
 include("grids.jl")
 include("shocks.jl")
+include("labor.jl")
+include("assets.jl")
 
 export
+    # params.jl
+    AbstractBewleyParams,
+    safe_ratio, upper_bound_level_tol,
+    asset_price, asset_prices, asset_upper_bound, hours_upper_bound,
+    borrowing_limit, first_feasible_asset_indices,
     # grids.jl
     asset_grid_with_zero, linear_asset_grid, nonnegative_asset_grid,
     two_region_asset_grid, zero_band_asset_grid,
@@ -39,6 +47,13 @@ export
     build_markov_shock, build_iid_normal_shock,
     quantecon_ar1, ar1_conditional_probabilities,
     normal_gauss_hermite, normal_cdf,
-    grid_lookup_weights, find_bracket, discounted_sum_with_tail
+    grid_lookup_weights, find_bracket, discounted_sum_with_tail,
+    # labor.jl
+    optimal_labor_foc, solve_labor_root, optimal_labor_grid,
+    labor_root_hybrid_newton, labor_foc_residual, labor_foc_residual_derivative,
+    uniform_labor_grid, normalize_labor_grid,
+    # assets.jl
+    default_asset_grid, asset_choice_bound_tol,
+    asset_transition_weights, nearest_asset_index
 
 end # module
