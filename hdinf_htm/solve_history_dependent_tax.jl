@@ -2152,9 +2152,6 @@ function attach_elapsed(eq, start_time::Float64, p::HDParams; kwargs...)
     return eq_with_elapsed
 end
 
-eq_flag(eq, field::Symbol) =
-    hasproperty(eq, field) && getproperty(eq, field) === true
-
 # -----------------------------------------------------------------------------
 # Self-contained consistency check (no external solver required)
 # -----------------------------------------------------------------------------

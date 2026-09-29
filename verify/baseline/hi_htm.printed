@@ -1,0 +1,84 @@
+
+=== History-independent tax finite-horizon solver ===
+Options:
+  age dimension J             = 39
+  shock grid dimension nZ     = 3
+  shock grid dimension nEps   = 3
+  shock grid dimension nKappa = 3
+  z_discretization_method     = :rouwenhorst  (alternatives: :rouwenhorst, :tauchen)
+  tauchen_width               = 3.000  (used when z_discretization_method = :tauchen)
+  asset grid dimension nA     = 41
+  asset_grid_method           = :nonuniform  (alternatives: :nonuniform, :linear)
+  asset_grid_borrow_share     = 0.350
+  asset_grid_curvatures       = borrow 1.800, save 2.500
+  asset_grid_zero_band        = share 0.300, width 0.080
+  asset_grid_bounds           = [-0.502895, 60.000000]
+  bbar                        = -0.2
+  pSS (stay saver)            = 0.8882970895          (s in psmodel.tex)
+  pHH (stay hand-to-mouth)    = 0.7589294614          (h in psmodel.tex)
+  access shares (piS, piH)    = (0.68335794, 0.31664206)
+  qSav                        = 0.99                  (price of saving,    a' >= 0)
+  qBorr                       = 0.97                  (price of borrowing, a' < 0)
+  qGov                        = 0.990000              (government discount price)
+  G                           = 0.000000              (government spending)
+  asset_choice_method         = :grid_search  (alternatives: :grid_search, :interpolate)
+  labor_solver                = :hybrid_newton  (alternatives: :brent, :hybrid_newton, :grid)
+  labor_bounds                = [1.00e-08, 5.0000]
+  terminal_borrowing          = :zero
+  lambda_solver               = :brent  (Roots.jl; fallback: grid search over 15 values)
+  lambda_bracket              = [0.200000, 2.500000], tol = 1.00e-05
+  collect_distributions       = true
+
+lambda = 0.20000000: residual = 2.33754270e-01
+lambda = 2.50000000: residual = -4.32940600e-01
+lambda eval 1: lambda=1.00641812, residual=-4.88147432e-04
+lambda eval 2: lambda=1.00473759, residual=-1.98613251e-07
+lambda eval 3: lambda=1.00473690, residual=4.52683396e-10
+lambda root: lambda=1.00473690, residual=4.52683396e-10
+
+=== Final history-independent equilibrium ===
+lambda                     = 1.00473690
+government budget residual = 4.52683396e-10
+PV output                  = 29.07786187
+PV consumption             = 29.07786182
+mean output                = 0.87744378
+mean consumption           = 0.87793594
+terminal assets            = 0.02170954
+qSav                       = 0.99
+qBorr                      = 0.97
+bbar                       = -0.2
+
+=== Aggregate statistics: model ages 3-40, real 22-59  [CALIBRATION WINDOW] ===
+mean assets / mean labor income          = 0.07521306
+median assets / mean labor income        = 0.00251315
+true borrowing limit / mean labor income = 0.21250297
+grid borrowing limit / mean labor income = 0.18736905
+share negative liquid assets             = 0.39566633
+share at effective grid borrowing bound  = 0.11107565
+share hand-to-mouth (target 0.316642)    = 0.31664206
+share with zero assets                   = 0.18644674
+share at upper asset bound               = 0.00000000
+share at hours upper bound               = 0.00000000
+mean assets at age 22 / mean labor income = 0.05058900
+median assets at age 22 / mean labor inc. = 0.00035087
+
+=== Aggregate statistics: model ages 1-40, real 20-59  [ALL AGES] ===
+mean assets / mean labor income          = 0.07216987
+median assets / mean labor income        = 0.00208446
+true borrowing limit / mean labor income = 0.21242748
+grid borrowing limit / mean labor income = 0.18719683
+share negative liquid assets             = 0.38031791
+share at effective grid borrowing bound  = 0.11083546
+share hand-to-mouth (target 0.316642)    = 0.31664206
+share with zero assets                   = 0.21828712
+share at upper asset bound               = 0.00000000
+share at hours upper bound               = 0.00000000
+
+=== Welfare ===
+overall value function utility = -0.4011020818
+overall simulation utility     = -0.4011020818
+overall difference             = -1.89293026e-14
+kappa      prob        value function  simulation     difference
+-0.600954  0.16666667  -0.7642252399  -0.7642252399   1.06359366e-13
+-0.050500  0.66666667  -0.4011037519  -0.4011037519  -1.38222767e-14
+ 0.499954  0.16666667  -0.0379722434  -0.0379722434  -1.64604441e-13

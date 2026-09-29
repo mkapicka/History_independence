@@ -79,7 +79,28 @@ include(joinpath(@__DIR__, "..", DIR, RUNNER))
 const SOLVE = startswith(DIR, "hd") ? run_history_dependent_tax :
                                       run_history_independent_tax
 
+# Solve twice: once quietly for the values, once verbose to capture the
+# printed summary. The printed form is checked separately because the value
+# file cannot see formatting, and the statistics printer is about to be
+# rewritten. Volatile lines (timings) are filtered out.
 r = SOLVE(; GRIDS[DIR]..., verbose = false, collect_distributions = true, OVERRIDES...)
+
+let tmp = tempname()
+    open(tmp, "w") do io
+        redirect_stdout(io) do
+            SOLVE(; GRIDS[DIR]..., verbose = true, collect_distributions = true, OVERRIDES...)
+        end
+    end
+    volatile = r"solve time|elapsed|seconds|Precompiling|precompiled"
+    lines = filter(l -> !occursin(volatile, l), readlines(tmp))
+    rm(tmp; force = true)
+    mkpath(dirname(OUT))
+    open(replace(OUT, ".txt" => ".printed"), "w") do io
+        for l in lines
+            println(io, rstrip(l))
+        end
+    end
+end
 
 lines = String[]
 emit!(lines, "lambda", r.eq.lambda)

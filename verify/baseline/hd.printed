@@ -1,0 +1,99 @@
+
+=== History-dependent tax finite-horizon solver ===
+Options:
+  age dimension J               = 39
+  shock grid dimension nZ       = 3
+  shock grid dimension nEps     = 3
+  shock grid dimension nKappa   = 3
+  z_discretization_method       = :rouwenhorst  (alternatives: :rouwenhorst, :tauchen)
+  asset grid dimension nA       = 41
+  asset grid bounds             = [-0.427834, 15.000000]
+  asset grid method             = :nonuniform  (alternatives: :nonuniform, :linear)
+  bbar                          = -0.17014842731387517
+  labor grid size               = 41 on [0.0500, 5.0000]
+  labor grid spacing            = :log  (alternatives: :log, :uniform)
+  exploit_hours_monotonicity    = true
+  labor history 1 dimension nS1 = 3
+  labor history 1 bounds        = [-7.6559, 4.6199]
+  labor history 1 grid method   = :linear  (alternatives: :linear, :quantile)
+  labor history 2 dimension nS2 = 3
+  labor history 2 bounds        = [-156.0036, 94.1399]
+  labor history 2 grid method   = :linear  (alternatives: :linear, :quantile)
+  qSav                          = 0.9723466284755885
+  qBorr                         = 1.0123473140001613
+  theta0 (implied)              = 0.283385
+  alpha                         = 0.922170
+  mu1, mu2                      = 0.606100, 0.987700
+  hours exponent (1-tau)*theta0 = 0.232092
+  s_hours_floor                 = 0.0500
+  terminal_borrowing            = :zero
+  lambda_solver                 = :brent  (Roots.jl; fallback: grid search over 15 values)
+  lambda_bracket                = [0.200000, 2.500000], tol = 1.00e-06
+  collect_distributions         = true
+
+lambda = 0.20000000: residual = 1.51986790e-01
+lambda = 2.50000000: residual = -1.19014835e+00
+lambda = 0.46045784: residual = -2.40571999e-03
+lambda = 0.45639943: residual = -4.14548345e-05
+lambda = 0.45632828: residual = -1.54912679e-06
+lambda = 0.45632552: residual = -1.42406248e-06
+lambda = 0.45629408: residual = 1.95391222e-05
+lambda = 0.45630980: residual = 7.88712744e-06
+lambda = 0.45631766: residual = 3.29994040e-06
+lambda = 0.45632159: residual = 1.03261350e-06
+lambda = 0.45632324: residual = 7.78014417e-08
+lambda = 0.45632337: residual = 4.21299396e-09
+lambda = 0.45632338: residual = 2.87816959e-11
+lambda = 0.45632445: residual = -6.17838822e-07
+lambda = 0.45632392: residual = -3.08905020e-07
+WARNING: 3.7381e-03 of mass had s' clamped to the s-grid bounds; consider widening nS1/nS2 or the s bounds.
+
+=== Final history-dependent equilibrium ===
+lambda                     = 0.45632338
+government budget residual = 2.87816959e-11
+PV output                  = 27.28995658
+PV consumption             = 27.28995658
+mean output                = 0.81520227
+mean consumption           = 0.83119690
+terminal assets            = 0.00000000
+qSav                       = 0.9723466284755885
+qBorr                      = 1.0123473140001613
+bbar                       = -0.17014842731387517
+theta0 (implied)           = 0.28338466
+s' clamped mass share      = 3.738e-03
+
+=== Aggregate statistics: model ages 3-40, real 22-59  [CALIBRATION WINDOW] ===
+mean assets / mean labor income          = 2.06679634
+median assets / mean labor income        = 0.20785358
+true borrowing limit / mean labor income = 0.19566186
+grid borrowing limit / mean labor income = 0.17827059
+share negative liquid assets             = 0.31260353
+share at effective grid borrowing bound  = 0.14532462
+share with zero assets                   = 0.01107304
+share at upper asset bound               = 0.02157393
+share at hours upper bound               = 0.00000000
+mean assets at age 22 / mean labor income = 0.72707353
+median assets at age 22 / mean labor inc. = 0.01570628
+
+=== Aggregate statistics: model ages 1-40, real 20-59  [ALL AGES] ===
+mean assets / mean labor income          = 1.96072961
+median assets / mean labor income        = 0.16633620
+true borrowing limit / mean labor income = 0.19451924
+grid borrowing limit / mean labor income = 0.17721289
+share negative liquid assets             = 0.31044654
+share at effective grid borrowing bound  = 0.13900288
+share with zero assets                   = 0.03584864
+share at upper asset bound               = 0.02049524
+share at hours upper bound               = 0.00000000
+
+=== Welfare ===
+overall value function utility = -0.9456383831
+overall simulation utility     = -0.9456383785
+overall difference             = 4.59177307e-09
+kappa      prob        value function  simulation     difference
+-0.600954  0.16666667  -1.2843893391  -1.2843893391   5.86197757e-14
+-0.050500  0.66666667  -0.9471223857  -0.9471223857   3.06976666e-13
+ 0.499954  0.16666667  -0.6009514168  -0.6009513892   2.75493516e-08
+
+=== Upper-bound warning ===
+asset upper bound binding: bound = 15.00000000, material max a' = 15.00000000, slack = 0.00000000e+00

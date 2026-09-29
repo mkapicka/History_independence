@@ -58,6 +58,6 @@ export
     default_asset_grid, asset_choice_bound_tol,
     asset_transition_weights, nearest_asset_index,
     # report.jl
-    print_welfare_summary, print_lambda_warnings
+    print_welfare_summary, print_lambda_warnings, eq_flag
 
 end # module

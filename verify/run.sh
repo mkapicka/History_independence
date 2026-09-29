@@ -7,7 +7,7 @@
 #
 #   ./verify/run.sh baseline          # before a change
 #   ./verify/run.sh after             # after it
-#   diff -r verify/baseline verify/after && echo "no number changed"
+#   diff -r verify/baseline verify/after && echo "nothing changed"
 #
 # Each directory has its own Julia environment, so each runs under its own
 # --project. Directories can be named to run a subset:

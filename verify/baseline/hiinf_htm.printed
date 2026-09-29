@@ -1,0 +1,97 @@
+
+=== History-independent tax infinite-horizon solver ===
+Options:
+  horizon                     = infinite (VFI fixed point)
+  maxAge (forward pass length)= 200
+  statistics window (model age)= 3-40 (real age 22-59)
+  tolV, maxIterV, howardSteps = 1.0e-08, 2000, 40
+  tolDist (settling report)   = 1.0e-10
+  shock grid dimension nZ     = 3
+  shock grid dimension nEps   = 3
+  shock grid dimension nKappa = 3
+  z_discretization_method     = :rouwenhorst  (alternatives: :rouwenhorst, :tauchen)
+  tauchen_width               = 3.000  (used when z_discretization_method = :tauchen)
+  asset grid dimension nA     = 41
+  asset_grid_method           = :nonuniform  (alternatives: :nonuniform, :linear)
+  asset_grid_borrow_share     = 0.350
+  asset_grid_curvatures       = borrow 1.800, save 2.500
+  asset_grid_zero_band        = share 0.300, width 0.080
+  asset_grid_bounds           = [-0.502895, 15.000000]
+  bbar                        = -0.2
+  pSS (stay saver)            = 0.8882970895          (s in psmodel.tex)
+  pHH (stay hand-to-mouth)    = 0.7589294614          (h in psmodel.tex)
+  access shares (piS, piH)    = (0.68335794, 0.31664206)
+  qSav                        = 0.99                  (price of saving,    a' >= 0)
+  qBorr                       = 0.97                  (price of borrowing, a' < 0)
+  qGov                        = 0.990000              (government discount price)
+  G                           = 0.000000              (government spending)
+  asset_choice_method         = :grid_search  (alternatives: :grid_search, :interpolate)
+  labor_solver                = :hybrid_newton  (alternatives: :brent, :hybrid_newton, :grid)
+  labor_bounds                = [1.00e-08, 5.0000]
+  terminal_borrowing          = :zero
+  lambda_solver               = :brent  (Roots.jl; fallback: grid search over 15 values)
+  lambda_bracket              = [0.200000, 2.500000], tol = 1.00e-05
+  collect_distributions       = true
+
+lambda = 0.20000000: residual = 6.93963041e-01
+lambda = 2.50000000: residual = -1.28803708e+00
+lambda eval 1: lambda=1.00530519, residual=-1.55481458e-03
+lambda eval 2: lambda=1.00350495, residual=7.27648489e-06
+lambda eval 3: lambda=1.00351334, residual=2.16159337e-08
+lambda eval 4: lambda=1.00351336, residual=3.03189245e-13
+lambda eval 5: lambda=1.00440928, residual=-7.79999456e-04
+lambda eval 6: lambda=1.00396132, residual=-3.87222681e-04
+lambda eval 7: lambda=1.00373734, residual=-1.93452532e-04
+lambda eval 8: lambda=1.00362535, residual=-9.68857224e-05
+lambda eval 9: lambda=1.00356936, residual=-4.84428985e-05
+lambda eval 10: lambda=1.00354136, residual=-2.42214585e-05
+lambda eval 11: lambda=1.00352736, residual=-1.21107314e-05
+lambda eval 12: lambda=1.00352036, residual=-6.05536614e-06
+lambda root: lambda=1.00351336, residual=3.03189245e-13
+
+=== Final history-independent equilibrium ===
+lambda                     = 1.00351336
+government budget residual = 3.03189245e-13
+PV output                  = 86.32147765
+PV consumption             = 86.32147765
+mean output                = 0.85921583
+mean consumption           = 0.86014557
+settled assets             = 0.12933589
+qSav                       = 0.99
+qBorr                      = 0.97
+bbar                       = -0.2
+
+=== Aggregate statistics: ages 3-40, real 22-59  [CALIBRATION WINDOW] ===
+mean assets / mean labor income          = 0.14040829
+median assets / mean labor income        = 0.01574063
+true borrowing limit / mean labor income = 0.21201298
+grid borrowing limit / mean labor income = 0.18695354
+share negative liquid assets             = 0.33620126
+share at effective grid borrowing bound  = 0.07620092
+share hand-to-mouth (target 0.316642)    = 0.31664206
+share with zero assets                   = 0.18637684
+share at upper asset bound               = 0.00000000
+share at hours upper bound               = 0.00000000
+mean assets at age 22 / mean labor income = 0.06318217
+median assets at age 22 / mean labor inc. = 0.00338472
+
+=== Aggregate statistics: ages 1-200, real 20-219  [ALL AGES] ===
+mean assets / mean labor income          = 0.14858562
+median assets / mean labor income        = 0.01756686
+true borrowing limit / mean labor income = 0.21219997
+grid borrowing limit / mean labor income = 0.18762360
+share negative liquid assets             = 0.36248823
+share at effective grid borrowing bound  = 0.07565457
+share hand-to-mouth (target 0.316642)    = 0.31664206
+share with zero assets                   = 0.14802887
+share at upper asset bound               = 0.00000000
+share at hours upper bound               = 0.00000000
+
+=== Welfare ===
+overall value function utility = -0.5070070847
+overall simulation utility     = -0.5070071718
+overall difference             = -8.71299560e-08
+kappa      prob        value function  simulation     difference
+-0.600954  0.16666667  -0.9581111568  -0.9581113723  -2.15457106e-07
+-0.050500  0.66666667  -0.5070635599  -0.5070636521  -9.22538097e-08
+ 0.499954  0.16666667  -0.0556771117  -0.0556770500   6.16926085e-08

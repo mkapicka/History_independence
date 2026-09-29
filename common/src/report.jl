@@ -27,6 +27,14 @@ function print_welfare_summary(w)
     return nothing
 end
 
+"""
+    eq_flag(eq, field)
+
+True when the equilibrium carries `field` and it is set. The warning flags are
+attached only on the paths that raise them, so every read has to be guarded.
+"""
+eq_flag(eq, field::Symbol) = hasproperty(eq, field) && getproperty(eq, field) === true
+
 function print_lambda_warnings(eq)
     has_warning = (hasproperty(eq, :converged) && eq.converged === false) ||
                   eq_flag(eq, :bracketWarning) ||

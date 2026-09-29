@@ -1,0 +1,83 @@
+
+=== History-independent tax infinite-horizon solver ===
+Options:
+  horizon                     = infinite (VFI fixed point)
+  maxAge (forward pass length)= 200
+  statistics window (model age)= 3-40 (real age 22-59)
+  tolV, maxIterV, howardSteps = 1.0e-08, 2000, 40
+  tolDist (settling report)   = 1.0e-10
+  shock grid dimension nZ     = 3
+  shock grid dimension nEps   = 3
+  shock grid dimension nKappa = 3
+  z_discretization_method     = :rouwenhorst  (alternatives: :rouwenhorst, :tauchen)
+  tauchen_width               = 3.000  (used when z_discretization_method = :tauchen)
+  asset grid dimension nA     = 41
+  asset_grid_method           = :nonuniform  (alternatives: :nonuniform, :linear)
+  asset_grid_borrow_share     = 0.350
+  asset_grid_curvatures       = borrow 1.800, save 2.500
+  asset_grid_zero_band        = share 0.300, width 0.080
+  asset_grid_bounds           = [-0.502895, 15.000000]
+  bbar                        = -0.2
+  qSav                        = 0.99                  (price of saving,    a' >= 0)
+  qBorr                       = 0.97                  (price of borrowing, a' < 0)
+  qGov                        = 0.990000              (government discount price)
+  G                           = 0.000000              (government spending)
+  asset_choice_method         = :grid_search  (alternatives: :grid_search, :interpolate)
+  labor_solver                = :hybrid_newton  (alternatives: :brent, :hybrid_newton, :grid)
+  labor_bounds                = [1.00e-08, 5.0000]
+  terminal_borrowing          = :zero
+  lambda_solver               = :brent  (Roots.jl; fallback: grid search over 15 values)
+  lambda_bracket              = [0.200000, 2.500000], tol = 1.00e-05
+  collect_distributions       = true
+
+lambda = 0.20000000: residual = 6.97292643e-01
+lambda = 2.50000000: residual = -1.28926819e+00
+lambda eval 1: lambda=1.00731133, residual=-1.57586740e-03
+lambda eval 2: lambda=1.00549094, residual=5.91720647e-06
+lambda eval 3: lambda=1.00549775, residual=-3.62334007e-09
+lambda root: lambda=1.00549775, residual=-3.62334007e-09
+
+=== Final history-independent equilibrium ===
+lambda                     = 1.00549775
+government budget residual = -3.62334007e-09
+PV output                  = 86.69071700
+PV consumption             = 86.69071736
+mean output                = 0.86281626
+mean consumption           = 0.86401810
+settled assets             = 0.17879365
+qSav                       = 0.99
+qBorr                      = 0.97
+bbar                       = -0.2
+
+=== Aggregate statistics: ages 3-40, real 22-59  [CALIBRATION WINDOW] ===
+mean assets / mean labor income          = 0.19869595
+median assets / mean labor income        = 0.06088372
+true borrowing limit / mean labor income = 0.21111538
+grid borrowing limit / mean labor income = 0.18616204
+share negative liquid assets             = 0.29843755
+share at effective grid borrowing bound  = 0.09576715
+share with zero assets                   = 0.13885663
+share at upper asset bound               = 0.00000000
+share at hours upper bound               = 0.00000000
+mean assets at age 22 / mean labor income = 0.10300261
+median assets at age 22 / mean labor inc. = 0.00841844
+
+=== Aggregate statistics: ages 1-200, real 20-219  [ALL AGES] ===
+mean assets / mean labor income          = 0.20555551
+median assets / mean labor income        = 0.06124514
+true borrowing limit / mean labor income = 0.21131449
+grid borrowing limit / mean labor income = 0.18684067
+share negative liquid assets             = 0.30859591
+share at effective grid borrowing bound  = 0.09607650
+share with zero assets                   = 0.12787962
+share at upper asset bound               = 0.00000000
+share at hours upper bound               = 0.00000000
+
+=== Welfare ===
+overall value function utility = -0.4968084998
+overall simulation utility     = -0.4968085819
+overall difference             = -8.20963182e-08
+kappa      prob        value function  simulation     difference
+-0.600954  0.16666667  -0.9480973042  -0.9480974451  -1.40856961e-07
+-0.050500  0.66666667  -0.4968768367  -0.4968769496  -1.12924387e-07
+ 0.499954  0.16666667  -0.0452463480  -0.0452462480   9.99766013e-08

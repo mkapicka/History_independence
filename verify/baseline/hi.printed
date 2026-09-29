@@ -1,0 +1,91 @@
+
+=== History-independent tax finite-horizon solver ===
+Options:
+  age dimension J             = 39
+  shock grid dimension nZ     = 3
+  shock grid dimension nEps   = 3
+  shock grid dimension nKappa = 3
+  z_discretization_method     = :rouwenhorst  (alternatives: :rouwenhorst, :tauchen)
+  tauchen_width               = 3.000  (used when z_discretization_method = :tauchen)
+  asset grid dimension nA     = 41
+  asset_grid_method           = :nonuniform  (alternatives: :nonuniform, :linear)
+  asset_grid_borrow_share     = 0.350
+  asset_grid_curvatures       = borrow 1.800, save 2.500
+  asset_grid_zero_band        = share 0.300, width 0.080
+  asset_grid_bounds           = [-0.502895, 15.000000]
+  bbar                        = -0.2
+  qSav                        = 0.99                  (price of saving,    a' >= 0)
+  qBorr                       = 0.97                  (price of borrowing, a' < 0)
+  qGov                        = 0.990000              (government discount price)
+  G                           = 0.000000              (government spending)
+  asset_choice_method         = :grid_search  (alternatives: :grid_search, :interpolate)
+  labor_solver                = :hybrid_newton  (alternatives: :brent, :hybrid_newton, :grid)
+  labor_bounds                = [1.00e-08, 5.0000]
+  terminal_borrowing          = :zero
+  lambda_solver               = :brent  (Roots.jl; fallback: grid search over 15 values)
+  lambda_bracket              = [0.200000, 2.500000], tol = 1.00e-05
+  collect_distributions       = true
+
+lambda = 0.20000000: residual = 2.35021053e-01
+lambda = 2.50000000: residual = -4.33785016e-01
+lambda eval 1: lambda=1.00822894, residual=-5.29560037e-04
+lambda eval 2: lambda=1.00641190, residual=1.08779145e-06
+lambda eval 3: lambda=1.00641562, residual=1.34937628e-08
+lambda eval 4: lambda=1.00641567, residual=-1.96760456e-10
+lambda root: lambda=1.00641567, residual=-1.96760456e-10
+
+=== Final history-independent equilibrium ===
+lambda                     = 1.00641567
+government budget residual = -1.96760456e-10
+PV output                  = 29.21499750
+PV consumption             = 29.21499752
+mean output                = 0.88125785
+mean consumption           = 0.88287538
+terminal assets            = 0.00000000
+qSav                       = 0.99
+qBorr                      = 0.97
+bbar                       = -0.2
+
+=== Aggregate statistics: model ages 3-40, real 22-59  [CALIBRATION WINDOW] ===
+mean assets / mean labor income          = 0.18929204
+median assets / mean labor income        = 0.05557642
+true borrowing limit / mean labor income = 0.21167029
+grid borrowing limit / mean labor income = 0.18663485
+share negative liquid assets             = 0.30183159
+share at effective grid borrowing bound  = 0.12037425
+share with zero assets                   = 0.13967571
+share at upper asset bound               = 0.00000000
+share at hours upper bound               = 0.00000000
+average impact MPC                       = 0.38267515
+  windfall                               = 0.00632780  (0.007189 of mean labor income)
+  mean MPC | responders (mpc > 0)        = 0.47438467
+  share mpc > 0 / mpc < 0 / mpc = 0      = 0.923511 / 0.076489 / 0.000000
+  median MPC                             = 0.40299912
+  mean MPC | a < 0.012656 (0.014378 of Y)  = 0.48050322  over share 0.441507
+mean assets at age 22 / mean labor income = 0.10323688
+median assets at age 22 / mean labor inc. = 0.00843759
+
+=== Aggregate statistics: model ages 1-40, real 20-59  [ALL AGES] ===
+mean assets / mean labor income          = 0.18108135
+median assets / mean labor income        = 0.04024638
+true borrowing limit / mean labor income = 0.21150810
+grid borrowing limit / mean labor income = 0.18638664
+share negative liquid assets             = 0.29090721
+share at effective grid borrowing bound  = 0.12198839
+share with zero assets                   = 0.17162731
+share at upper asset bound               = 0.00000000
+share at hours upper bound               = 0.00000000
+average impact MPC                       = 0.39228567
+  windfall                               = 0.00632780  (0.007180 of mean labor income)
+  mean MPC | responders (mpc > 0)        = 0.48309369
+  share mpc > 0 / mpc < 0 / mpc = 0      = 0.925306 / 0.074694 / 0.000000
+  mean MPC | a < 0.012656 (0.014361 of Y)  = 0.49385368  over share 0.462535
+
+=== Welfare ===
+overall value function utility = -0.3924125646
+overall simulation utility     = -0.3924125646
+overall difference             = -1.05471187e-15
+kappa      prob        value function  simulation     difference
+-0.600954  0.16666667  -0.7554877819  -0.7554877819  -2.55351296e-15
+-0.050500  0.66666667  -0.3924775030  -0.3924775030  -8.88178420e-16
+ 0.499954  0.16666667  -0.0290775937  -0.0290775937  -4.16333634e-17
