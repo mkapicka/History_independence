@@ -627,21 +627,6 @@ function print_aggregate_statistics(s, p::HIParams; label::AbstractString = "")
     return nothing
 end
 
-function print_welfare_summary(w)
-    @printf("\n=== Welfare ===\n")
-    @printf("overall value function utility = %.10f\n", w.overallValueFunction)
-    @printf("overall simulation utility     = %.10f\n", w.overallSimulation)
-    @printf("overall difference             = %.8e\n", w.overallDifference)
-    @printf("kappa      prob        value function  simulation     difference\n")
-    for ik in eachindex(w.kappaGrid)
-        @printf("% .6f  %.8f  % .10f  % .10f  % .8e\n",
-                w.kappaGrid[ik], w.kappaProbabilities[ik],
-                w.valueFunctionByKappa[ik], w.simulationByKappa[ik],
-                w.differenceByKappa[ik])
-    end
-    return nothing
-end
-
 # Failure modes (no bracket, Brent throw, residual above tolerance) are reported
 # with @warn at the point of failure, so eq carries only `converged` beyond the
 # equilibrium objects themselves.

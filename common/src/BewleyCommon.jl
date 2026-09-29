@@ -22,6 +22,7 @@
 module BewleyCommon
 
 using FastGaussQuadrature
+using Printf
 using QuantEcon
 using Roots
 using StatsBase
@@ -31,6 +32,7 @@ include("grids.jl")
 include("shocks.jl")
 include("labor.jl")
 include("assets.jl")
+include("report.jl")
 
 export
     # params.jl
@@ -54,6 +56,8 @@ export
     uniform_labor_grid, normalize_labor_grid,
     # assets.jl
     default_asset_grid, asset_choice_bound_tol,
-    asset_transition_weights, nearest_asset_index
+    asset_transition_weights, nearest_asset_index,
+    # report.jl
+    print_welfare_summary, print_lambda_warnings
 
 end # module

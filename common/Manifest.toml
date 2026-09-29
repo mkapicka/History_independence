@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.1"
-project_hash = "a609e22d0a6143a0e45d3df3004954d4268c2b22"
+project_hash = "d8f4bbe92ea96d0376d88e252acb2ca4ef54ecf4"
 
 [[deps.ADTypes]]
 deps = ["PrecompileTools"]
@@ -138,7 +138,7 @@ uuid = "0e736298-9ec6-45e8-9647-e4fc86a2fe38"
 version = "0.2.8"
 
 [[deps.BewleyCommon]]
-deps = ["FastGaussQuadrature", "QuantEcon", "Roots", "StatsBase"]
+deps = ["FastGaussQuadrature", "Printf", "QuantEcon", "Roots", "StatsBase"]
 path = "."
 uuid = "b5698081-e285-4c29-ab05-7220f335ed37"
 version = "0.1.0"

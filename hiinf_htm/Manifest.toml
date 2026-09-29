@@ -138,7 +138,7 @@ uuid = "0e736298-9ec6-45e8-9647-e4fc86a2fe38"
 version = "0.2.8"
 
 [[deps.BewleyCommon]]
-deps = ["FastGaussQuadrature", "QuantEcon", "Roots", "StatsBase"]
+deps = ["FastGaussQuadrature", "Printf", "QuantEcon", "Roots", "StatsBase"]
 path = "../common"
 uuid = "b5698081-e285-4c29-ab05-7220f335ed37"
 version = "0.1.0"
