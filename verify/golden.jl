@@ -1,0 +1,90 @@
+# =============================================================================
+# golden.jl
+#
+# Golden-master harness. Solves one directory's model at small grids and writes
+# every scalar of the equilibrium to a flat text file, one `key = value` line
+# per scalar, sorted. Comparing two such files proves whether a refactoring
+# changed any number the solver produces.
+#
+# Run it through verify/run.sh rather than directly: each directory has its own
+# Julia environment, and the grids differ by model family.
+#
+#   julia --project=<dir> verify/golden.jl <dir> <out-file>
+#
+# Values are written with `repr`, which round-trips Float64 exactly, so the
+# comparison is bit-for-bit and a plain `diff` is the check.
+#
+# Marek Kapicka, 2026
+# =============================================================================
+
+const DIR = ARGS[1]
+const OUT = ARGS[2]
+
+# Small grids: seconds per solve rather than the ~31s median of a production
+# run, while still exercising every code path. The hd family carries the two
+# stock dimensions and a coarser hours grid; the inf family needs maxAge.
+const GRIDS = Dict(
+    "hi"        => (; J = 39, nA = 41, nZ = 3, nEps = 3, nKappa = 3),
+    "hi_htm"    => (; J = 39, nA = 41, nZ = 3, nEps = 3, nKappa = 3),
+    "hiinf"     => (; nA = 41, nZ = 3, nEps = 3, nKappa = 3, maxAge = 200),
+    "hiinf_htm" => (; nA = 41, nZ = 3, nEps = 3, nKappa = 3, maxAge = 200),
+    "hd"        => (; J = 39, nA = 41, nZ = 3, nEps = 3, nKappa = 3,
+                      nS1 = 3, nS2 = 3, labor_grid_size = 41),
+    "hd_htm"    => (; J = 39, nA = 41, nZ = 3, nEps = 3, nKappa = 3,
+                      nS1 = 3, nS2 = 3, labor_grid_size = 41),
+    "hdinf"     => (; nA = 41, nZ = 3, nEps = 3, nKappa = 3,
+                      nS1 = 3, nS2 = 3, labor_grid_size = 41, maxAge = 200),
+    "hdinf_htm" => (; nA = 41, nZ = 3, nEps = 3, nKappa = 3,
+                      nS1 = 3, nS2 = 3, labor_grid_size = 41, maxAge = 200),
+)
+
+haskey(GRIDS, DIR) || error("unknown directory $(DIR); add its grids to GRIDS")
+
+# Flatten anything the equilibrium carries into `key = value` lines. Arrays are
+# reduced to length and a checksum rather than written out: the point is to
+# detect change, and a full asset distribution would swamp the file.
+function emit!(lines, prefix, x)
+    if x isa Number || x isa Bool
+        push!(lines, "$(prefix) = $(repr(x))")
+    elseif x isa Symbol || x isa AbstractString
+        push!(lines, "$(prefix) = $(repr(String(x)))")
+    elseif x isa AbstractArray && eltype(x) <: Number
+        push!(lines, "$(prefix).length = $(length(x))")
+        push!(lines, "$(prefix).sum = $(repr(sum(Float64.(x))))")
+        isempty(x) || push!(lines, "$(prefix).first = $(repr(Float64(first(x))))")
+        isempty(x) || push!(lines, "$(prefix).last = $(repr(Float64(last(x))))")
+    elseif x isa NamedTuple
+        for k in keys(x)
+            emit!(lines, "$(prefix).$(k)", getproperty(x, k))
+        end
+    end
+    return lines
+end
+
+const RUNNER = startswith(DIR, "hd") ? "run_history_dependent_tax.jl" :
+                                       "run_history_independent_tax.jl"
+include(joinpath(@__DIR__, "..", DIR, RUNNER))
+const SOLVE = startswith(DIR, "hd") ? run_history_dependent_tax :
+                                      run_history_independent_tax
+
+r = SOLVE(; GRIDS[DIR]..., verbose = false, collect_distributions = true)
+
+lines = String[]
+emit!(lines, "lambda", r.eq.lambda)
+emit!(lines, "govBudgetResidual", r.eq.govBudgetResidual)
+for field in (:statistics, :statisticsAllAges, :welfare)
+    hasproperty(r.eq, field) && emit!(lines, String(field), getproperty(r.eq, field))
+end
+for field in (:C, :H, :Y, :A)
+    hasproperty(r.eq, field) && emit!(lines, String(field), getproperty(r.eq, field))
+end
+
+sort!(lines)
+mkpath(dirname(OUT))
+open(OUT, "w") do io
+    println(io, "# golden master: ", DIR)
+    for l in lines
+        println(io, l)
+    end
+end
+println("  ", DIR, ": ", length(lines), " values -> ", OUT)

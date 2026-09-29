@@ -9,3 +9,6 @@ results/
 LaTeX/
 
 .DS_Store
+
+# golden-master run logs (regenerated; the .txt references ARE tracked)
+verify/*/*.log
