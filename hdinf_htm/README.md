@@ -119,7 +119,7 @@ labor_grid_size=31, mu1=0, mu2=0.6, alpha=0`.
 
 ## Problems found
 
-1. **`common/shocks_hd.jl` uses a low-accuracy normal CDF in the solution, and
+1. **`common/shocks.jl` uses a low-accuracy normal CDF in the solution, and
    its own comment says it does not.** Its `normal_cdf` is the Zelen-Severo
    rational approximation (A&S 26.2.17), documented there as "maximum absolute
    error 7.5e-8 ... used only to place s-grid nodes at distribution quantiles

@@ -16,6 +16,15 @@ using QuantEcon
 using Roots
 using StatsBase
 
+# -----------------------------------------------------------------------------
+# Shared infrastructure. Included rather than imported, so the methods land in
+# THIS module's scope exactly as when they were written out inline here.
+# grids.jl first: shocks.jl uses nearest_index, normalize_probabilities and
+# validate_transition from it.
+# -----------------------------------------------------------------------------
+include(joinpath(@__DIR__, "..", "common", "grids.jl"))
+include(joinpath(@__DIR__, "..", "common", "shocks.jl"))
+
 """
     VINFEASIBLE
 
@@ -1919,84 +1928,6 @@ ar1_initial_probabilities(z_initial::Float64, z_grid::Vector{Float64}, rho::Floa
         ar1_conditional_probabilities(z_initial, z_grid, rho, innovation_mean, innovation_sd),
         "z0_probs")
 
-function quantecon_ar1(n::Int, rho::Float64, innovation_mean::Float64,
-                       innovation_sd::Float64; method::Symbol = :rouwenhorst,
-                       width::Float64 = 3.0)
-    n >= 1 || error("n must be positive")
-    innovation_sd >= 0.0 || error("innovation_sd must be nonnegative")
-    method in (:rouwenhorst, :tauchen) ||
-        error("method must be :rouwenhorst or :tauchen")
-    abs(rho) < 1.0 || error("rho must satisfy |rho| < 1")
-
-    unconditional_mean = innovation_mean / (1.0 - rho)
-    if n == 1 || innovation_sd == 0.0
-        grid = [unconditional_mean]
-        return grid, ones(1, 1)
-    end
-
-    mc = method == :rouwenhorst ?
-         QuantEcon.rouwenhorst(n, rho, innovation_sd, innovation_mean) :
-         QuantEcon.tauchen(n, rho, innovation_sd, innovation_mean, width)
-    grid = collect(Float64.(mc.state_values))
-    P = Matrix{Float64}(mc.p)
-    return grid, P
-end
-
-function ar1_conditional_probabilities(current_z::Real, grid::AbstractVector{<:Real},
-                                       rho::Float64, innovation_mean::Float64,
-                                       innovation_sd::Float64)
-    grid = collect(Float64.(grid))
-    n = length(grid)
-    n >= 1 || error("grid must be nonempty")
-    if n == 1 || innovation_sd == 0.0
-        p = zeros(n)
-        p[nearest_index(grid, innovation_mean + rho * current_z)] = 1.0
-        return p
-    end
-
-    mean_next = innovation_mean + rho * current_z
-    cutoffs = [(grid[i] + grid[i + 1]) / 2.0 for i in 1:(n - 1)]
-    probs = Vector{Float64}(undef, n)
-
-    probs[1] = normal_cdf((cutoffs[1] - mean_next) / innovation_sd)
-    for j in 2:(n - 1)
-        upper = (cutoffs[j] - mean_next) / innovation_sd
-        lower = (cutoffs[j - 1] - mean_next) / innovation_sd
-        probs[j] = normal_cdf(upper) - normal_cdf(lower)
-    end
-    probs[n] = 1.0 - normal_cdf((cutoffs[end] - mean_next) / innovation_sd)
-    return normalize_probabilities(probs, "AR(1) conditional probabilities")
-end
-
-function normal_gauss_hermite(n::Int, mean::Float64, sd::Float64)
-    n >= 1 || error("n must be positive")
-    sd >= 0.0 || error("sd must be nonnegative")
-    if n == 1 || sd == 0.0
-        return [mean], [1.0]
-    end
-
-    nodes, weights = gausshermite(n; normalize = true)
-    probs = normalize_probabilities(collect(weights), "Gauss-Hermite weights")
-    grid = mean .+ sd .* nodes
-    return collect(grid), probs
-end
-
-function normal_cdf(x::Real)
-    z = Float64(x)
-    if z < -8.0
-        return 0.0
-    elseif z > 8.0
-        return 1.0
-    end
-    return QuantEcon.std_norm_cdf(z)
-end
-
-# -----------------------------------------------------------------------------
-# Shared infrastructure. Included rather than imported, so the methods land in
-# THIS module's scope exactly as when they were written out inline here.
-# -----------------------------------------------------------------------------
-include(joinpath(@__DIR__, "..", "common", "grids.jl"))
-
 
 """
     default_asset_grid(bbar, aMax, nA, rho, kappa_grid, z_grid; grid options...)
@@ -2011,18 +1942,6 @@ function default_asset_grid(bbar::Float64, aMax::Float64, nA::Int, rho::Float64,
         error("Use bbar <= 0. For a borrowing limit B > 0, pass bbar = -B.")
     amin = minimum(bbar * exp(kappa + rho * z) for kappa in kappa_grid for z in z_grid)
     return asset_grid_with_zero(amin, aMax, nA; kwargs...)
-end
-
-
-function find_bracket(grid, residuals)
-    for i in 1:(length(grid) - 1)
-        # sign(0.0) is 0.0, so an exact zero at either end also brackets.
-        if isfinite(residuals[i]) && isfinite(residuals[i + 1]) &&
-           sign(residuals[i]) != sign(residuals[i + 1])
-            return (i, i + 1)
-        end
-    end
-    return nothing
 end
 
 

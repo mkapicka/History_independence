@@ -10,5 +10,9 @@ LaTeX/
 
 .DS_Store
 
-# golden-master run logs (regenerated; the .txt references ARE tracked)
+# Golden-master output. Only the baseline is a reference and is tracked; every
+# other tag is a transient capture taken to diff against it, and the run logs
+# are regenerated.
+verify/*/
+!verify/baseline/
 verify/*/*.log

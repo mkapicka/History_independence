@@ -478,7 +478,7 @@ const S_GRID_UNIFORM_BLEND = 0.30
 # THIS module's scope exactly as when they were written out inline here.
 # -----------------------------------------------------------------------------
 include(joinpath(@__DIR__, "..", "common", "grids.jl"))
-include(joinpath(@__DIR__, "..", "common", "shocks_hd.jl"))
+include(joinpath(@__DIR__, "..", "common", "shocks.jl"))
 
 
 """

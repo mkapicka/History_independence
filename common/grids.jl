@@ -18,7 +18,7 @@
 # HDParams/HIParams argument. The solvers themselves stay separate; that
 # separation is deliberate and was never the cause of the drift. Helpers that
 # had already diverged between the hi and hd families stay local to each -- see
-# common/shocks_hd.jl for the hd-family set. `build_labor_grid` in particular
+# common/shocks.jl for the rest. `build_labor_grid` in particular
 # takes a different number of arguments in the two families, so pooling it
 # would be a behaviour change rather than a refactor.
 #

@@ -1,11 +1,14 @@
 # =============================================================================
-# common/shocks_hd.jl
+# common/shocks.jl
 #
-# Shock discretization and interpolation helpers shared by the hd FAMILY only
-# (hd and hdinf), where they were byte-identical before extraction. The hi
-# family either lacks these or carries a drifted variant, so it does not include
-# this file. See common/grids.jl for the set shared by all four, and for why
-# these files exist at all.
+# Shock discretization and interpolation helpers shared by ALL EIGHT solvers.
+# Until 2026-09-29 the hi family carried its own copies of quantecon_ar1,
+# ar1_conditional_probabilities, normal_gauss_hermite and normal_cdf; they were
+# byte-identical to these (quantecon_ar1 up to one temp variable), so the copies
+# were deleted and this file is now included by the hi family too. See
+# common/grids.jl for the rest, and note that build_labor_grid here is NOT the
+# hi family's: theirs is a 3-argument uniform grid, this one is 4-argument and
+# log-spaced by default.
 #
 # `normal_cdf` here is the deduplicated version. Both hd and hdinf previously
 # defined it TWICE -- once taking ::Float64 (Abramowitz and Stegun 26.2.17) and
@@ -183,12 +186,18 @@ end
 
 function find_bracket(grid, residuals)
     for i in 1:(length(grid) - 1)
-        if isfinite(residuals[i]) && isfinite(residuals[i + 1])
-            if residuals[i] == 0.0
-                return (i, i)
-            elseif sign(residuals[i]) != sign(residuals[i + 1])
-                return (i, i + 1)
-            end
+        # sign(0.0) is 0.0, so an exact zero at either end also brackets, and
+        # the interval returned is never degenerate. Returning (i, i) on an
+        # exact zero -- which this did until 2026-09-29 -- hands Roots.Brent a
+        # zero-width interval, which throws ArgumentError("Need extrema to
+        # return two distinct values"). Every caller wraps the solve in a
+        # try/catch, so the throw was swallowed and the solver reported
+        # convergence failure in the one case where it had found the exact
+        # root. The hi family always used this convention; the hd family did
+        # not, and this is what brings them together.
+        if isfinite(residuals[i]) && isfinite(residuals[i + 1]) &&
+           sign(residuals[i]) != sign(residuals[i + 1])
+            return (i, i + 1)
         end
     end
     return nothing
