@@ -23,8 +23,7 @@ using StatsBase
 # grids.jl first: shocks.jl uses nearest_index, normalize_probabilities and
 # validate_transition from it.
 # -----------------------------------------------------------------------------
-include(joinpath(@__DIR__, "..", "common", "grids.jl"))
-include(joinpath(@__DIR__, "..", "common", "shocks.jl"))
+using BewleyCommon
 
 """
     HIParams(; kwargs...)

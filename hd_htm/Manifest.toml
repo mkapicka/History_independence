@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "44800f6c67786a5f653d97e57e1a2bdc0d9a1d59"
+project_hash = "e9b3e254c3e2ebc42f7166a26953e088ed870af3"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "bbc22a9a08a0ef6460041086d8a7b27940ed4ffd"
@@ -132,6 +132,12 @@ version = "1.11.0"
 git-tree-sha1 = "4435559dc39793d53a9e3d278e185e920b4619ef"
 uuid = "0e736298-9ec6-45e8-9647-e4fc86a2fe38"
 version = "0.2.8"
+
+[[deps.BewleyCommon]]
+deps = ["FastGaussQuadrature", "QuantEcon", "Roots", "StatsBase"]
+path = "../common"
+uuid = "b5698081-e285-4c29-ab05-7220f335ed37"
+version = "0.1.0"
 
 [[deps.BitFlags]]
 git-tree-sha1 = "bbe1079eecf9c9fbb52765193ad2bae27ae09bc8"

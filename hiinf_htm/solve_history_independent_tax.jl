@@ -22,8 +22,7 @@ using StatsBase
 # grids.jl first: shocks.jl uses nearest_index, normalize_probabilities and
 # validate_transition from it.
 # -----------------------------------------------------------------------------
-include(joinpath(@__DIR__, "..", "common", "grids.jl"))
-include(joinpath(@__DIR__, "..", "common", "shocks.jl"))
+using BewleyCommon
 
 """
     VINFEASIBLE
@@ -2322,25 +2321,3 @@ function default_asset_grid(bbar::Float64, aMax::Float64, nA::Int, rho::Float64,
     return asset_grid_with_zero(amin, aMax, nA; kwargs...)
 end
 
-
-"""
-    discounted_sum_with_tail(x, q)
-
-Present value of `x` over an INFINITE horizon, with the path constant at
-`x[end]` past the last element:
-
-    sum_{j=1}^{n} q^(j-1) x_j  +  x_n * q^n / (1 - q).
-
-`discounted_sum` alone stops dead at `maxAge`, which drops `q^maxAge` of the
-total -- 0.24% at qGov = 0.99 and maxAge = 600, and measurably so: outputPV
-read 88.75 at maxAge 600 against 88.96 at 1200, a gap of 0.234% where q^600
-predicts 0.2405%. The government budget never had this problem because it
-already closed its own tail; this is the same closure applied to the reported
-present values, and it makes them independent of maxAge.
-"""
-function discounted_sum_with_tail(x::AbstractVector{<:Real}, q::Real)
-    isempty(x) && return 0.0
-    0 <= q < 1 || error("discounted_sum_with_tail needs 0 <= q < 1, got q = $q")
-    n = length(x)
-    return discounted_sum(x, q) + x[n] * q^n / (1 - q)
-end

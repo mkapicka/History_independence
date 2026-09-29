@@ -318,7 +318,7 @@ function HDParams(;
     minimum(a_grid) <= 0.0 <= maximum(a_grid) || error("a_grid must contain 0")
     maximum(a_grid) <= aMax + 1e-12 || error("a_grid has points above aMax")
 
-    h_grid = build_labor_grid(hMin, hMax, labor_grid_size, h_grid;
+    h_grid = BewleyCommon.build_labor_grid(hMin, hMax, labor_grid_size, h_grid;
                               spacing = labor_grid_spacing)
     h_grid_disutility = phi .* (h_grid .^ (1.0 + eta)) ./ (1.0 + eta)
     log_h_grid = log.(h_grid)
@@ -389,8 +389,7 @@ const S_GRID_UNIFORM_BLEND = 0.30
 # Shared infrastructure. Included rather than imported, so the methods land in
 # THIS module's scope exactly as when they were written out inline here.
 # -----------------------------------------------------------------------------
-include(joinpath(@__DIR__, "..", "common", "grids.jl"))
-include(joinpath(@__DIR__, "..", "common", "shocks.jl"))
+using BewleyCommon
 
 
 """

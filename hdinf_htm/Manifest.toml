@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "97e2cf7d9dab882aaa62ab134c9f3f8ff1a74546"
+project_hash = "7e6e0428ec59d2d89ca1a47249635a23e8fe818d"
 
 [[deps.ADTypes]]
 deps = ["PrecompileTools"]
@@ -139,6 +139,12 @@ version = "1.11.0"
 git-tree-sha1 = "4435559dc39793d53a9e3d278e185e920b4619ef"
 uuid = "0e736298-9ec6-45e8-9647-e4fc86a2fe38"
 version = "0.2.8"
+
+[[deps.BewleyCommon]]
+deps = ["FastGaussQuadrature", "QuantEcon", "Roots", "StatsBase"]
+path = "../common"
+uuid = "b5698081-e285-4c29-ab05-7220f335ed37"
+version = "0.1.0"
 
 [[deps.Bzip2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]

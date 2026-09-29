@@ -19,6 +19,13 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
+# Pin the Julia version. The PATH default is whatever juliaup points at (1.13.0
+# at the time of writing), and anything that writes a Manifest under it rewrites
+# the file to manifest_format 2.1, which the cluster's newest Julia (1.12.6)
+# cannot read. Pinning here keeps both the solves and any Pkg operation on the
+# version the environments are resolved for.
+JULIA="${JULIA:-julia +1.12.6}"
+
 TAG="${1:?usage: run.sh <tag> [dirs...] [key=value ...]}"
 shift
 DIRS=()
@@ -37,7 +44,7 @@ mkdir -p "verify/$TAG"
 fail=0
 for d in "${DIRS[@]}"; do
     out="verify/$TAG/$d.txt"
-    if julia --startup-file=no --project="$d" -t 2 verify/golden.jl "$d" "$out" \
+    if $JULIA --startup-file=no --project="$d" -t 2 verify/golden.jl "$d" "$out" \
          ${OVERRIDES[@]+"${OVERRIDES[@]}"} > "verify/$TAG/$d.log" 2>&1; then
         :
     else
