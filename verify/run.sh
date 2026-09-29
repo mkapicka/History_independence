@@ -19,9 +19,16 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-TAG="${1:?usage: run.sh <tag> [dirs...]}"
+TAG="${1:?usage: run.sh <tag> [dirs...] [key=value ...]}"
 shift
-DIRS=("$@")
+DIRS=()
+OVERRIDES=()
+for a in "$@"; do
+    case "$a" in
+        *=*) OVERRIDES+=("$a") ;;
+        *)   DIRS+=("$a") ;;
+    esac
+done
 if [ ${#DIRS[@]} -eq 0 ]; then
     DIRS=(hi hi_htm hiinf hiinf_htm hd hd_htm hdinf hdinf_htm)
 fi
@@ -31,7 +38,7 @@ fail=0
 for d in "${DIRS[@]}"; do
     out="verify/$TAG/$d.txt"
     if julia --startup-file=no --project="$d" -t 2 verify/golden.jl "$d" "$out" \
-         > "verify/$TAG/$d.log" 2>&1; then
+         ${OVERRIDES[@]+"${OVERRIDES[@]}"} > "verify/$TAG/$d.log" 2>&1; then
         :
     else
         echo "  FAILED $d  (see verify/$TAG/$d.log)"

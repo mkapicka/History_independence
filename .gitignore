@@ -15,4 +15,5 @@ LaTeX/
 # are regenerated.
 verify/*/
 !verify/baseline/
+!verify/baseline-interpolate/
 verify/*/*.log

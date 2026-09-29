@@ -20,6 +20,18 @@
 const DIR = ARGS[1]
 const OUT = ARGS[2]
 
+# Trailing `key=value` arguments override the grids below, so a non-default
+# configuration can be captured under its own tag. The default asset choice is
+# :grid_search, which leaves the 168-line :interpolate path uncovered; passing
+# asset_choice_method=:interpolate gives it a golden master of its own.
+parse_override(s) = startswith(s, ":") ? Symbol(s[2:end]) :
+                    s == "true"  ? true :
+                    s == "false" ? false :
+                    something(tryparse(Int, s), tryparse(Float64, s), String(s))
+const OVERRIDES = NamedTuple(
+    Symbol(strip(a[1:findfirst('=', a)-1])) => parse_override(strip(a[findfirst('=', a)+1:end]))
+    for a in ARGS[3:end] if occursin('=', a))
+
 # Small grids: seconds per solve rather than the ~31s median of a production
 # run, while still exercising every code path. The hd family carries the two
 # stock dimensions and a coarser hours grid; the inf family needs maxAge.
@@ -67,7 +79,7 @@ include(joinpath(@__DIR__, "..", DIR, RUNNER))
 const SOLVE = startswith(DIR, "hd") ? run_history_dependent_tax :
                                       run_history_independent_tax
 
-r = SOLVE(; GRIDS[DIR]..., verbose = false, collect_distributions = true)
+r = SOLVE(; GRIDS[DIR]..., verbose = false, collect_distributions = true, OVERRIDES...)
 
 lines = String[]
 emit!(lines, "lambda", r.eq.lambda)
@@ -82,7 +94,7 @@ end
 sort!(lines)
 mkpath(dirname(OUT))
 open(OUT, "w") do io
-    println(io, "# golden master: ", DIR)
+    println(io, "# golden master: ", DIR, isempty(OVERRIDES) ? "" : "  " * string(OVERRIDES))
     for l in lines
         println(io, l)
     end

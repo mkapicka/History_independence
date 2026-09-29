@@ -1526,7 +1526,7 @@ per accumulator per positive-mass state per age.
         # limit averages; the finite solver excludes its terminal age, where
         # a' >= 0 replaces the limit.
         stats.borrowing_limit_mass += weighted_mass
-        if weighted_mass > upper_bound_share_tol()
+        if weighted_mass > UPPER_BOUND_SHARE_TOL
             stats.max_material_next_assets = max(stats.max_material_next_assets, ap)
             stats.max_material_hours = max(stats.max_material_hours, h)
         end
@@ -1972,8 +1972,8 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
     hours_upper = hours_upper_bound(p)
     asset_upper_bound_slack = asset_upper - max_material_next_assets
     hours_upper_bound_slack = hours_upper - max_material_hours
-    asset_upper_bound_binding = share_at_asset_upper_bound > upper_bound_share_tol()
-    hours_upper_bound_binding = share_at_hours_upper_bound > upper_bound_share_tol()
+    asset_upper_bound_binding = share_at_asset_upper_bound > UPPER_BOUND_SHARE_TOL
+    hours_upper_bound_binding = share_at_hours_upper_bound > UPPER_BOUND_SHARE_TOL
     distributions = (;
         assetGrid = p.a_grid,
         assetMass = copy(stats.asset_mass),
@@ -2015,7 +2015,7 @@ function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
     )
 end
 
-upper_bound_share_tol() = 1e-8
+const UPPER_BOUND_SHARE_TOL = 1e-8
 upper_bound_level_tol(bound::Real) = 1e-8 * max(1.0, abs(Float64(bound)))
 asset_upper_bound(p::HIParams) = maximum(p.a_grid)
 hours_upper_bound(p::HIParams) = p.hMax
