@@ -63,6 +63,7 @@ using StatsBase
 # subtypes AbstractBewleyParams.
 # -----------------------------------------------------------------------------
 using BewleyCommon
+using BewleyCommon: BlockScratch, initial_asset_weights
 
 export HDParams, HD_SETTINGS, make_history_dependent_params,
        solve_history_dependent_tax, print_hd_equilibrium_summary,
@@ -813,29 +814,6 @@ end
 # result is bit-for-bit identical to a serial run.
 # -----------------------------------------------------------------------------
 
-# Per-thread scratch. EVh starts zeroed because the terminal age is solved
-# first and reads it as the (zero) continuation without writing it.
-struct BlockScratch
-    inc::Vector{Float64}
-    l1v::Vector{Int}
-    h1v::Vector{Int}
-    w1v::Vector{Float64}
-    l2v::Vector{Int}
-    h2v::Vector{Int}
-    w2v::Vector{Float64}
-    ih_ub::Vector{Int}          # monotone upper bound on optimal ih, per a'
-    EVh::Matrix{Float64}        # EV at (h, a')
-end
-
-function BlockScratch(nH::Int, nA::Int)
-    return BlockScratch(
-        Vector{Float64}(undef, nH),
-        Vector{Int}(undef, nH), Vector{Int}(undef, nH), Vector{Float64}(undef, nH),
-        Vector{Int}(undef, nH), Vector{Int}(undef, nH), Vector{Float64}(undef, nH),
-        Vector{Int}(undef, nA), zeros(nH, nA),
-    )
-end
-
 """
     solve_block!(...)
 
@@ -1056,19 +1034,6 @@ function solve_value_function_for_kappa(lambda::Float64, kappa::Float64,
 
     welfare_value_function = expected_initial_value(Vnext, kappa, p)
     return policyAIndex, policyH, Vnext, welfare_value_function, iters, gap
-end
-
-"""
-    initial_asset_weights(kappa, p)
-
-Grid placement of the initial asset holding, as `(left, right, right_weight)`
-from the same Young lottery used for a'. Both the birth value function and the
-simulated initial distribution go through THIS function; if they disagree the
-value-function/simulation welfare cross-check breaks, which is the guard wanted.
-"""
-function initial_asset_weights(kappa::Float64, p::HDParams)
-    a0 = p.a0_scales_with_kappa ? p.a0 * exp(kappa) : p.a0
-    return grid_lookup_weights(p.a_grid, clamp(a0, first(p.a_grid), last(p.a_grid)))
 end
 
 function expected_initial_value(V0, kappa::Float64, p::HDParams)

@@ -63,6 +63,7 @@ using StatsBase
 # subtypes AbstractBewleyParams.
 # -----------------------------------------------------------------------------
 using BewleyCommon
+using BewleyCommon: BlockScratch
 
 export HDParams, HD_SETTINGS, make_history_dependent_params,
        solve_history_dependent_tax, print_hd_equilibrium_summary,
@@ -907,29 +908,6 @@ end
 # at 3 cores. Blocks write disjoint slices and only read the shared EVz, so the
 # result is bit-for-bit identical to a serial run.
 # -----------------------------------------------------------------------------
-
-# Per-thread scratch. EVh starts zeroed because the terminal age is solved
-# first and reads it as the (zero) continuation without writing it.
-struct BlockScratch
-    inc::Vector{Float64}
-    l1v::Vector{Int}
-    h1v::Vector{Int}
-    w1v::Vector{Float64}
-    l2v::Vector{Int}
-    h2v::Vector{Int}
-    w2v::Vector{Float64}
-    ih_ub::Vector{Int}          # monotone upper bound on optimal ih, per a'
-    EVh::Matrix{Float64}        # EV at (h, a')
-end
-
-function BlockScratch(nH::Int, nA::Int)
-    return BlockScratch(
-        Vector{Float64}(undef, nH),
-        Vector{Int}(undef, nH), Vector{Int}(undef, nH), Vector{Float64}(undef, nH),
-        Vector{Int}(undef, nH), Vector{Int}(undef, nH), Vector{Float64}(undef, nH),
-        Vector{Int}(undef, nA), zeros(nH, nA),
-    )
-end
 
 """
     solve_block!(...)

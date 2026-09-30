@@ -22,6 +22,7 @@
 module BewleyCommon
 
 using FastGaussQuadrature
+using LinearAlgebra
 using Printf
 using QuantEcon
 using Roots
@@ -37,6 +38,9 @@ include("values.jl")
 include("access.jl")
 include("statistics.jl")
 include("report.jl")
+# Family-specific, nothing exported -- see the header of each file.
+include("hi_model.jl")
+include("hd_model.jl")
 
 export
     # params.jl

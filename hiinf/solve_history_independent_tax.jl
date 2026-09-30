@@ -23,6 +23,7 @@ using StatsBase
 # validate_transition from it.
 # -----------------------------------------------------------------------------
 using BewleyCommon
+using BewleyCommon: finalize_welfare, precompute_income_bases
 
 """
     VINFEASIBLE
@@ -1225,26 +1226,6 @@ function solve_aggregates_for_lambda(lambda::Float64, p::HIParams)
     return (; C = C, H = H, Y = Y, A = A), stats, stats_all, welfare, solutions, diagnostics
 end
 
-function finalize_welfare(value_function_by_kappa::Vector{Float64},
-                          simulation_by_kappa::Vector{Float64},
-                          p::HIParams)
-    difference_by_kappa = simulation_by_kappa .- value_function_by_kappa
-    overall_value_function = dot(p.Pkappa, value_function_by_kappa)
-    overall_simulation = dot(p.Pkappa, simulation_by_kappa)
-    overall_difference = overall_simulation - overall_value_function
-
-    return (;
-        kappaGrid = p.kappa_grid,
-        kappaProbabilities = p.Pkappa,
-        valueFunctionByKappa = value_function_by_kappa,
-        simulationByKappa = simulation_by_kappa,
-        differenceByKappa = difference_by_kappa,
-        overallValueFunction = overall_value_function,
-        overallSimulation = overall_simulation,
-        overallDifference = overall_difference,
-    )
-end
-
 """
     finalize_statistics(stats, p)
 
@@ -1258,19 +1239,6 @@ finalize_statistics(stats::HIStatsAccumulator, p::HIParams) =
 # replaces it with a' >= 0 at the terminal age; there is no terminal age here.
 function asset_choice_lower_bound(kappa::Float64, iz::Int, p::HIParams)
     return borrowing_limit(kappa, iz, p)
-end
-
-function precompute_income_bases(kappa::Float64, p::HIParams)
-    nZ = length(p.z_grid)
-    nE = length(p.eps_grid)
-    tax_base = Matrix{Float64}(undef, nZ, nE)
-    wage_base = Matrix{Float64}(undef, nZ, nE)
-    @inbounds for iz in 1:nZ, ie in 1:nE
-        log_wage = kappa + p.z_grid[iz] + p.eps_grid[ie]
-        tax_base[iz, ie] = exp((1.0 - p.tau) * log_wage)
-        wage_base[iz, ie] = exp(log_wage)
-    end
-    return tax_base, wage_base
 end
 
 ar1_grid(n::Int, rho::Float64, innovation_mean::Float64, innovation_sd::Float64,
