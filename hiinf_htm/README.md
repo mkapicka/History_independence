@@ -73,7 +73,7 @@ labor income = 0.185, and the mean or median asset ratio). Run it with
     r = calibrate_history_independent_tax_beta(calib = BetaCalibration(asset_moment = :mean),
                                                nZ = 15, nEps = 11, nKappa = 5, nA = 151)
 
-`calibrate_history_independent_tax_Claude.jl` comes along because the beta
+`calibrate_history_independent_tax.jl` comes along because the beta
 driver includes it for `solve_scalar`, `moments_from` and `with_tee`; its own
 three-instrument calibration is carried over untouched and unused.
 
@@ -141,7 +141,7 @@ before `maxAge` does. What the rule proxies for is already measured ex post by
 ## What changed against `hiinf`
 
 `plot_history_independent_tax.jl` and
-`calibrate_history_independent_tax_Claude.jl` are byte-identical; the solver,
+`calibrate_history_independent_tax.jl` are byte-identical; the solver,
 settings, runner and beta calibration change by 471 / 32 / 15 / 60 lines. The saver's problem is untouched — it is the
 `hiinf` code with `EV_S` substituted for `EV`.
 

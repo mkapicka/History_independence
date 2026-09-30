@@ -5,7 +5,7 @@ rewritten in the terse Discrete_HA register. Each entry records a number that
 settled a choice and is not recoverable from the code itself. Line numbers are
 from the pre-rewrite files and will drift; the anchor line identifies the site.
 
-## `hiinf_htm/calibrate_history_independent_tax_Claude.jl:1`
+## `hiinf_htm/calibrate_history_independent_tax.jl:1`
 
 Anchor: `using Dates`
 
@@ -74,7 +74,7 @@ Anchor: `using Dates`
 # =============================================================================
 ```
 
-## `hiinf_htm/calibrate_history_independent_tax_Claude.jl:110`
+## `hiinf_htm/calibrate_history_independent_tax.jl:110`
 
 Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498  # (i), asset_moment = :`
 
@@ -91,7 +91,7 @@ Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498  # (i), asset_mom
     # negative liquid balances.
 ```
 
-## `hiinf_htm/calibrate_history_independent_tax_Claude.jl:126`
+## `hiinf_htm/calibrate_history_independent_tax.jl:126`
 
 Anchor: `qSav_init::Float64  = 0.980681209802701`
 

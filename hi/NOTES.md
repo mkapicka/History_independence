@@ -5,7 +5,7 @@ rewritten in the terse Discrete_HA register. Each entry records a number that
 settled a choice and is not recoverable from the code itself. Line numbers are
 from the pre-rewrite files and will drift; the anchor line identifies the site.
 
-## `hi/calibrate_history_independent_tax_Claude.jl:1`
+## `hi/calibrate_history_independent_tax.jl:1`
 
 Anchor: `using Dates`
 
@@ -74,7 +74,7 @@ Anchor: `using Dates`
 # =============================================================================
 ```
 
-## `hi/calibrate_history_independent_tax_Claude.jl:110`
+## `hi/calibrate_history_independent_tax.jl:110`
 
 Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498  # (i), asset_moment = :`
 

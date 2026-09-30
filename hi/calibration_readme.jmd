@@ -10,7 +10,7 @@ Calibrate the model to match the three targets in `CalibrationParams` by adjusti
 Make sure you are in the current directory of the repository, or adjust the path to accordingly. The calibration file itself includes the model settings and solver, so you do not need to include those separately. 
 
 ```julia
-include("calibrate_history_independent_tax_Claude.jl")
+include("calibrate_history_independent_tax.jl")
 result = calibrate_history_independent_tax()
 ``` 
 

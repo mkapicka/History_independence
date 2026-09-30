@@ -129,7 +129,7 @@ restriction.
    no `warn_if_htm_rollover_clipped` here; judge it from
    `statistics.shareAtAssetUpperBound`.
 3. **Not ported:** the three calibration drivers in `hi`
-   (`calibrate_history_independent_tax_Claude.jl` and friends). They go through
+   (`calibrate_history_independent_tax.jl` and friends). They go through
    `make_history_independent_params` and read `eq.statistics`, so `pSS`/`pHH`
    flow through `base_kwargs` untouched; only the transcript filename would
    need them, exactly as in `hiinf_htm`.

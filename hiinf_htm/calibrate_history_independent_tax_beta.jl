@@ -96,7 +96,7 @@
 # three-instrument file rather than copying them. Guarded so including several
 # calibration files in one session does not redefine everything.
 isdefined(@__MODULE__, :solve_scalar) ||
-    include("calibrate_history_independent_tax_Claude.jl")
+    include("calibrate_history_independent_tax.jl")
 
 using Dates
 using Printf
