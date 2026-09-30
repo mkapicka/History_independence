@@ -32,12 +32,15 @@ include("grids.jl")
 include("shocks.jl")
 include("labor.jl")
 include("assets.jl")
+include("asset_choice.jl")
+include("values.jl")
+include("access.jl")
 include("statistics.jl")
 include("report.jl")
 
 export
     # params.jl
-    AbstractBewleyParams,
+    AbstractBewleyParams, VINFEASIBLE,
     safe_ratio, upper_bound_level_tol,
     asset_price, asset_prices, asset_upper_bound, hours_upper_bound,
     borrowing_limit, first_feasible_asset_indices,
@@ -50,20 +53,27 @@ export
     build_markov_shock, build_iid_normal_shock,
     quantecon_ar1, ar1_conditional_probabilities,
     normal_gauss_hermite, normal_cdf,
-    grid_lookup_weights, find_bracket, discounted_sum_with_tail,
+    grid_lookup_weights, find_bracket, discounted_sum_with_tail, ar1_transition,
     # labor.jl
     optimal_labor_foc, solve_labor_root, optimal_labor_grid,
     labor_root_hybrid_newton, labor_foc_residual, labor_foc_residual_derivative,
-    uniform_labor_grid, normalize_labor_grid,
+    uniform_labor_grid, normalize_labor_grid, precompute_flow_payoffs,
     # assets.jl
     default_asset_grid, asset_choice_bound_tol,
-    asset_transition_weights, nearest_asset_index,
+    asset_transition_weights, nearest_asset_index, first_nonnegative_asset_index,
+    # asset_choice.jl  (the :interpolate path)
+    interpolate_asset_value, interpolated_choice_value, maximize_asset_segment,
+    update_with_asset_segment_max, interpolated_asset_choice,
+    # values.jl
+    compute_expected_value!, evaluate_policy_grid_search!, evaluate_block!,
+    # access.jl
+    access_stationary_distribution,
     # statistics.jl
     AbstractStatsAccumulator, UPPER_BOUND_SHARE_TOL,
     core_statistics, mpc_statistics,
     # report.jl
     print_aggregate_statistics, print_upper_bound_warning,
-    print_welfare_summary,
+    print_welfare_summary, warn_if_unsettled,
     print_lambda_warnings, eq_flag
 
 end # module

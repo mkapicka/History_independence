@@ -22,8 +22,24 @@ const OUT = ARGS[2]
 
 # Trailing `key=value` arguments override the grids below, so a non-default
 # configuration can be captured under its own tag. The default asset choice is
-# :grid_search, which leaves the 168-line :interpolate path uncovered; passing
+# :grid_search, which leaves the :interpolate path uncovered; passing
 # asset_choice_method=:interpolate gives it a golden master of its own.
+#
+# One caveat on the :interpolate tag. That path picks a' by optimizing over a
+# continuous segment, so a last-bit change in the objective can move the argmax,
+# and in the infinite-horizon solvers the forward pass amplifies it while
+# settling on a marginally different fixed point. Measured: making common/ a
+# package in cee3167 -- a pure file move plus `include` becoming `using`, with
+# no arithmetic touched at all -- moved 78 of hiinf's 130 values by about 1e-8
+# relative, because crossing a module boundary changes inlining and therefore
+# floating-point contraction. The same run repeated on one build is exactly
+# reproducible; only recompilation moves it.
+#
+# So a diff on this tag after code crosses a module boundary is expected and is
+# not by itself a bug. Check the magnitude before concluding anything: 1e-8
+# relative is this effect, while a real error shows up in :grid_search too,
+# which selects an integer index and is immune. :grid_search has stayed
+# bit-identical through every step of the consolidation.
 parse_override(s) = startswith(s, ":") ? Symbol(s[2:end]) :
                     s == "true"  ? true :
                     s == "false" ? false :

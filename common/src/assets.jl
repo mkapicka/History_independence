@@ -48,3 +48,12 @@ function nearest_asset_index(ap::Float64, p::AbstractBewleyParams)
     lo, hi, weight_hi = asset_transition_weights(ap, p)
     return weight_hi <= 0.5 ? lo : hi
 end
+
+function first_nonnegative_asset_index(p::AbstractBewleyParams)
+    idx = searchsortedfirst(p.a_grid, -1e-12)
+    while idx <= length(p.a_grid) && p.a_grid[idx] < -1e-12
+        idx += 1
+    end
+    idx <= length(p.a_grid) || error("a_grid must contain a nonnegative asset point")
+    return idx
+end

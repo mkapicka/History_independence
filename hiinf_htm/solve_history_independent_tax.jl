@@ -44,30 +44,6 @@ available. This is the same device `hd` uses (there to avoid `0 * Inf = NaN` in
 the s-interpolation), which is why the infinite-horizon hd solver never hit
 this.
 """
-const VINFEASIBLE = -1.0e18
-
-"""
-    access_stationary_distribution(pSS, pHH)
-
-Stationary shares `(piS, piH)` of the two-state asset-market-access chain
-
-    Pr(S'=S | S) = pSS,   Pr(H'=H | H) = pHH,
-
-which is `(1-pHH, 1-pSS) / (2 - pSS - pHH)`. The initial cross-section is set
-to this distribution (psmodel.tex), so the HtM share is constant over the life
-cycle rather than drifting towards it.
-
-Three parameterizations are nested. `pSS = 1, pHH = 0` makes everyone a saver
-and reproduces `hiinf` exactly; `pSS = 0, pHH = 1` makes everyone
-hand-to-mouth; `pHH = 1 - pSS` makes access iid with `piH = pHH`.
-"""
-function access_stationary_distribution(pSS::Real, pHH::Real)
-    denom = 2.0 - Float64(pSS) - Float64(pHH)
-    denom > 0.0 || error("pSS = $pSS and pHH = $pHH make the access chain " *
-                         "reducible (2 - pSS - pHH = $denom); the stationary " *
-                         "distribution is not unique")
-    return ((1.0 - Float64(pHH)) / denom, (1.0 - Float64(pSS)) / denom)
-end
 
 """
     HIParams(; kwargs...)
@@ -732,55 +708,6 @@ function warn_if_htm_rollover_clipped(eq, p::HIParams)
     return nothing
 end
 
-"""
-    warn_if_unsettled(eq, p)
-
-Report the cross-section drift of the RETURNED equilibrium, once.
-
-The closed-form PV tail assumes Y_j - C_j has stopped moving past `maxAge`.
-Checking that inside the per-lambda solve produced one warning per probe, and
-the root-finder visits corners (lambda = lambdaMin, qSav near its bracket) where
-the economy is degenerate and legitimately unsettled -- true but useless. Only
-the equilibrium actually returned has to be clean, so the test lives here, on
-the single funnel every return path passes through.
-
-The drift is reported RELATIVE to Y: an absolute bound on a sum of aggregate
-differences is uninterpretable without its scale. A converged solve was measured
-at 1.7e-09 of Y with lambda and W invariant to 15 digits across a doubled
-maxAge; a genuinely unsettled path runs 1e-04 and worse. `tolDriftRel` sits
-between them, and `Inf` silences this entirely.
-"""
-function warn_if_unsettled(eq, p::HIParams; converged::Bool = true)
-    # A solve whose lambda never converged is not an equilibrium, so its
-    # settling behaviour is not informative -- and the lambda failure is already
-    # reported by the solver. Stacking a second warning on top buries the one
-    # that matters. Observed: a calibration probe at qSav = 0.911 (floor 0.900)
-    # where no lambda balances the budget, bottoming out at lambda = 0.018
-    # against an equilibrium ~1.01, warned twice for one underlying problem.
-    converged || return nothing
-    hasproperty(eq, :diagnostics) || return nothing
-    d = eq.diagnostics.finalDrift
-    yscale = abs(eq.Y[end]) > 0 ? abs(eq.Y[end]) : 1.0
-    any(x -> !(x / yscale <= p.tolDriftRel), d) || return nothing
-    lines = join((@sprintf("kappa %d (% .4f): drift %.3e (%.1e of Y)  convergedAge %s",
-                           ik, p.kappa_grid[ik], d[ik], d[ik] / yscale,
-                           eq.diagnostics.convergedAgeByKappa[ik] == 0 ? "never" :
-                           string(eq.diagnostics.convergedAgeByKappa[ik]))
-                  for ik in eachindex(d)), "\n")
-    @warn("RETURNED equilibrium: cross-section drift at maxAge exceeds tolDriftRel " *
-          "for at least one kappa; the closed-form PV tail assumes the path has " *
-          "settled.\n" *
-          @sprintf("maxAge = %d, tolDriftRel = %.1e, Y[end] = %.6f\n",
-                   p.maxAge, p.tolDriftRel, eq.Y[end]) *
-          @sprintf("qSav = %.8f, qBorr = %.8f, bbar = %.8f, lambda = %.8f\n",
-                   p.qSav, p.qBorr, p.bbar, eq.lambda) * lines *
-          "\nThis is a CONVERGED equilibrium being returned, not a lambda probe. " *
-          "During a calibration it is still one instrument triple among many; " *
-          "check qSav/qBorr/bbar above against the calibrated values. " *
-          "Judge by the relative column; raise maxAge if it is not many orders below Y.")
-    return nothing
-end
-
 function government_residual_at_lambda(lambda::Float64, p::HIParams)
     aggs, stats, stats_all, welfare, solutions, diag =
         solve_aggregates_for_lambda(lambda, p)
@@ -1099,37 +1026,6 @@ function solve_policies_for_kappa(lambda::Float64, kappa::Float64,
 end
 
 """
-    evaluate_policy_grid_search!(Vcur, policyAIndex, flow_u, EV, p, util_weight, beta)
-
-Policy evaluation: apply the stored asset choice without searching over it.
-This is the cheap half of Howard's method -- one lookup per state instead of a
-scan over `ia_first:nA` -- so it costs roughly 1/nA of a maximizing sweep.
-
-Only the grid-search branch has this, because it is the branch whose flow
-payoff `flow_u` is precomputed; reconstructing the payoff would cost as much as
-re-optimizing and defeat the purpose.
-"""
-function evaluate_policy_grid_search!(Vcur, policyAIndex, flow_u, EV,
-                                      p::HIParams, util_weight::Float64,
-                                      beta::Float64)
-    nA = length(p.a_grid)
-    nZ = length(p.z_grid)
-    nE = length(p.eps_grid)
-    @inbounds for ia in 1:nA, iz in 1:nZ, ie in 1:nE
-        iap = Int(policyAIndex[ia, iz, ie])
-        u = flow_u[iap, ia, iz, ie]
-        # A state with no feasible choice carries the `ia_first` fallback
-        # policy, whose flow payoff is -Inf. Writing that into V would undo the
-        # finite sentinel: the next maximizing sweep would see EV = -Inf, fail
-        # every comparison, and fall back again -- so the state must keep the
-        # same finite value the maximizer gave it.
-        Vcur[ia, iz, ie] = isfinite(u) ?
-            util_weight * u + beta * EV[iap, iz] : VINFEASIBLE
-    end
-    return nothing
-end
-
-"""
     initial_asset_weights(kappa, p)
 
 Grid placement of the initial asset holding for a household of type `kappa`, as
@@ -1230,182 +1126,6 @@ function solve_policy_age_interpolated!(Vcur, policyAIndex, policyA, policyH,
         end
     end
     return nothing
-end
-
-function interpolated_asset_choice(a::Float64, lower::Float64,
-                                   income_coeff::Float64, EV, iz::Int,
-                                   p::HIParams, util_weight::Float64,
-                                   beta::Float64)
-    upper = asset_upper_bound(p)
-    lower = min(max(lower, p.a_grid[1]), upper)
-
-    best_val, best_h = interpolated_choice_value(
-        lower, a, income_coeff, EV, iz, p, util_weight, beta,
-    )
-    best_ap = lower
-
-    val_upper, h_upper = interpolated_choice_value(
-        upper, a, income_coeff, EV, iz, p, util_weight, beta,
-    )
-    if val_upper > best_val
-        best_val = val_upper
-        best_ap = upper
-        best_h = h_upper
-    end
-
-    if lower < 0.0 < upper
-        val_zero, h_zero = interpolated_choice_value(
-            0.0, a, income_coeff, EV, iz, p, util_weight, beta,
-        )
-        if val_zero > best_val
-            best_val = val_zero
-            best_ap = 0.0
-            best_h = h_zero
-        end
-    end
-
-    if lower < 0.0
-        segment_hi = min(0.0, upper)
-        best_val, best_ap, best_h = update_with_asset_segment_max(
-            best_val, best_ap, best_h, lower, segment_hi,
-            a, income_coeff, EV, iz, p, util_weight, beta,
-        )
-    end
-
-    if upper > 0.0
-        segment_lo = max(0.0, lower)
-        best_val, best_ap, best_h = update_with_asset_segment_max(
-            best_val, best_ap, best_h, segment_lo, upper,
-            a, income_coeff, EV, iz, p, util_weight, beta,
-        )
-    end
-
-    return best_val, best_ap, nearest_asset_index(best_ap, p), best_h
-end
-
-function update_with_asset_segment_max(best_val::Float64, best_ap::Float64,
-                                       best_h::Float64, lo::Float64, hi::Float64,
-                                       a::Float64, income_coeff::Float64, EV,
-                                       iz::Int, p::HIParams,
-                                       util_weight::Float64, beta::Float64)
-    if hi - lo <= p.asset_choice_tol * max(1.0, abs(hi))
-        return best_val, best_ap, best_h
-    end
-
-    ap, val, h = maximize_asset_segment(
-        lo, hi, a, income_coeff, EV, iz, p, util_weight, beta,
-    )
-    if val > best_val
-        return val, ap, h
-    end
-    return best_val, best_ap, best_h
-end
-
-function maximize_asset_segment(lo::Float64, hi::Float64, a::Float64,
-                                income_coeff::Float64, EV, iz::Int,
-                                p::HIParams, util_weight::Float64,
-                                beta::Float64)
-    invphi = (sqrt(5.0) - 1.0) / 2.0
-    c = hi - invphi * (hi - lo)
-    d = lo + invphi * (hi - lo)
-    vc, hc = interpolated_choice_value(c, a, income_coeff, EV, iz, p, util_weight, beta)
-    vd, hd = interpolated_choice_value(d, a, income_coeff, EV, iz, p, util_weight, beta)
-
-    for _ in 1:p.asset_choice_max_iter
-        if hi - lo <= p.asset_choice_tol * max(1.0, abs(0.5 * (lo + hi)))
-            break
-        end
-
-        if vc < vd
-            lo = c
-            c = d
-            vc = vd
-            hc = hd
-            d = lo + invphi * (hi - lo)
-            vd, hd = interpolated_choice_value(
-                d, a, income_coeff, EV, iz, p, util_weight, beta,
-            )
-        else
-            hi = d
-            d = c
-            vd = vc
-            hd = hc
-            c = hi - invphi * (hi - lo)
-            vc, hc = interpolated_choice_value(
-                c, a, income_coeff, EV, iz, p, util_weight, beta,
-            )
-        end
-    end
-
-    if vc >= vd
-        return c, vc, hc
-    end
-    return d, vd, hd
-end
-
-function interpolated_choice_value(ap::Float64, a::Float64,
-                                   income_coeff::Float64, EV, iz::Int,
-                                   p::HIParams, util_weight::Float64,
-                                   beta::Float64)
-    cash = a - asset_price(ap, p) * ap
-    u, h = optimal_labor_foc(cash, income_coeff, p)
-    if !isfinite(u)
-        return -Inf, p.hMin
-    end
-    continuation = interpolate_asset_value(ap, p.a_grid, EV, iz)
-    return util_weight * u + beta * continuation, h
-end
-
-function interpolate_asset_value(ap::Float64, a_grid::Vector{Float64}, values, iz::Int)
-    nA = length(a_grid)
-    if ap <= a_grid[1]
-        return values[1, iz]
-    elseif ap >= a_grid[nA]
-        return values[nA, iz]
-    end
-
-    hi = searchsortedfirst(a_grid, ap)
-    if hi <= nA && a_grid[hi] == ap
-        return values[hi, iz]
-    end
-    lo = hi - 1
-    weight_hi = (ap - a_grid[lo]) / (a_grid[hi] - a_grid[lo])
-    return (1.0 - weight_hi) * values[lo, iz] + weight_hi * values[hi, iz]
-end
-
-function precompute_flow_payoffs(lambda::Float64, first_ap::Vector{Int},
-                                 q_by_ap::Vector{Float64},
-                                 tax_base::Matrix{Float64}, p::HIParams)
-    nA = length(p.a_grid)
-    nZ = length(p.z_grid)
-    nE = length(p.eps_grid)
-    flow_u = fill(-Inf, nA, nA, nZ, nE)
-    flow_h = Array{Float64}(undef, nA, nA, nZ, nE)
-    cash = Array{Float64}(undef, nA, nA)
-
-    @inbounds for ia in 1:nA, iap in 1:nA
-        cash[iap, ia] = p.a_grid[ia] - q_by_ap[iap] * p.a_grid[iap]
-    end
-
-    @inbounds for ia in 1:nA
-        for iz in 1:nZ
-            ia_first = first_ap[iz]
-            for ie in 1:nE
-                income_coeff = lambda * tax_base[iz, ie]
-                for iap in ia_first:nA
-                    cash_iap_ia = cash[iap, ia]
-
-                    u, h = optimal_labor_foc(cash_iap_ia, income_coeff, p)
-                    if isfinite(u)
-                        flow_u[iap, ia, iz, ie] = u
-                        flow_h[iap, ia, iz, ie] = h
-                    end
-                end
-            end
-        end
-    end
-
-    return flow_u, flow_h
 end
 
 """
@@ -1881,41 +1601,6 @@ finalize_statistics(stats::HIStatsAccumulator, p::HIParams) =
     merge(core_statistics(stats, p),
           (; shareHandToMouth = stats.htm_mass / stats.total_mass))
 
-function compute_expected_value!(EV, Vnext, p::HIParams)
-    nA = length(p.a_grid)
-    nZ = length(p.z_grid)
-    nE = length(p.eps_grid)
-    fill!(EV, 0.0)
-
-    @inbounds for ia in 1:nA
-        for iz in 1:nZ
-            total = 0.0
-            for izp in 1:nZ
-                pe_z = p.Pz[iz, izp]
-                if pe_z == 0.0
-                    continue
-                end
-                eps_total = 0.0
-                for iep in 1:nE
-                    eps_total += p.Peps[iep] * Vnext[ia, izp, iep]
-                end
-                total += pe_z * eps_total
-            end
-            EV[ia, iz] = total
-        end
-    end
-    return EV
-end
-
-function first_nonnegative_asset_index(p::HIParams)
-    idx = searchsortedfirst(p.a_grid, -1e-12)
-    while idx <= length(p.a_grid) && p.a_grid[idx] < -1e-12
-        idx += 1
-    end
-    idx <= length(p.a_grid) || error("a_grid must contain a nonnegative asset point")
-    return idx
-end
-
 # Infinite horizon: the borrowing limit binds at every age. The finite solver
 # replaces it with a' >= 0 at the terminal age; there is no terminal age here.
 function asset_choice_lower_bound(kappa::Float64, iz::Int, p::HIParams)
@@ -1939,15 +1624,6 @@ ar1_grid(n::Int, rho::Float64, innovation_mean::Float64, innovation_sd::Float64,
          method::Symbol, tauchen_width::Float64) =
     first(quantecon_ar1(n, rho, innovation_mean, innovation_sd;
                         method = method, width = tauchen_width))
-
-function ar1_transition(n::Int, rho::Float64, innovation_mean::Float64,
-                        innovation_sd::Float64, method::Symbol,
-                        tauchen_width::Float64)
-    P = last(quantecon_ar1(n, rho, innovation_mean, innovation_sd;
-                           method = method, width = tauchen_width))
-    validate_transition(P, size(P, 1))
-    return P
-end
 
 gauss_hermite_grid(n::Int, mean::Float64, sd::Float64) =
     first(normal_gauss_hermite(n, mean, sd))

@@ -77,3 +77,8 @@ function first_feasible_asset_indices(kappa::Float64, p::AbstractBewleyParams)
     end
     return idx
 end
+
+# Sentinel value for a choice that violates a constraint, so it can never win a
+# maximization. Large and negative rather than -Inf: an -Inf would propagate
+# through the expectation and poison states that do have feasible choices.
+const VINFEASIBLE = -1.0e18

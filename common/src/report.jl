@@ -174,3 +174,52 @@ function print_lambda_warnings(eq)
     end
     flush(stdout)
 end
+
+"""
+    warn_if_unsettled(eq, p)
+
+Report the cross-section drift of the RETURNED equilibrium, once.
+
+The closed-form PV tail assumes Y_j - C_j has stopped moving past `maxAge`.
+Checking that inside the per-lambda solve produced one warning per probe, and
+the root-finder visits corners (lambda = lambdaMin, qSav near its bracket) where
+the economy is degenerate and legitimately unsettled -- true but useless. Only
+the equilibrium actually returned has to be clean, so the test lives here, on
+the single funnel every return path passes through.
+
+The drift is reported RELATIVE to Y: an absolute bound on a sum of aggregate
+differences is uninterpretable without its scale. A converged solve was measured
+at 1.7e-09 of Y with lambda and W invariant to 15 digits across a doubled
+maxAge; a genuinely unsettled path runs 1e-04 and worse. `tolDriftRel` sits
+between them, and `Inf` silences this entirely.
+"""
+function warn_if_unsettled(eq, p::AbstractBewleyParams; converged::Bool = true)
+    # A solve whose lambda never converged is not an equilibrium, so its
+    # settling behaviour is not informative -- and the lambda failure is already
+    # reported by the solver. Stacking a second warning on top buries the one
+    # that matters. Observed: a calibration probe at qSav = 0.911 (floor 0.900)
+    # where no lambda balances the budget, bottoming out at lambda = 0.018
+    # against an equilibrium ~1.01, warned twice for one underlying problem.
+    converged || return nothing
+    hasproperty(eq, :diagnostics) || return nothing
+    d = eq.diagnostics.finalDrift
+    yscale = abs(eq.Y[end]) > 0 ? abs(eq.Y[end]) : 1.0
+    any(x -> !(x / yscale <= p.tolDriftRel), d) || return nothing
+    lines = join((@sprintf("kappa %d (% .4f): drift %.3e (%.1e of Y)  convergedAge %s",
+                           ik, p.kappa_grid[ik], d[ik], d[ik] / yscale,
+                           eq.diagnostics.convergedAgeByKappa[ik] == 0 ? "never" :
+                           string(eq.diagnostics.convergedAgeByKappa[ik]))
+                  for ik in eachindex(d)), "\n")
+    @warn("RETURNED equilibrium: cross-section drift at maxAge exceeds tolDriftRel " *
+          "for at least one kappa; the closed-form PV tail assumes the path has " *
+          "settled.\n" *
+          @sprintf("maxAge = %d, tolDriftRel = %.1e, Y[end] = %.6f\n",
+                   p.maxAge, p.tolDriftRel, eq.Y[end]) *
+          @sprintf("qSav = %.8f, qBorr = %.8f, bbar = %.8f, lambda = %.8f\n",
+                   p.qSav, p.qBorr, p.bbar, eq.lambda) * lines *
+          "\nThis is a CONVERGED equilibrium being returned, not a lambda probe. " *
+          "During a calibration it is still one instrument triple among many; " *
+          "check qSav/qBorr/bbar above against the calibrated values. " *
+          "Judge by the relative column; raise maxAge if it is not many orders below Y.")
+    return nothing
+end

@@ -68,7 +68,6 @@ export HDParams, HD_SETTINGS, make_history_dependent_params,
        solve_history_dependent_tax, print_hd_equilibrium_summary,
        check_history_independent_limit
 
-const VINFEASIBLE = -1.0e18
 
 # -----------------------------------------------------------------------------
 # Parameters
@@ -729,15 +728,6 @@ function precompute_income_bases(kappa::Float64, p::HDParams)
         wage_base[iz, ie] = exp(log_wage)
     end
     return tax_base, wage_base
-end
-
-function first_nonnegative_asset_index(p::HDParams)
-    idx = searchsortedfirst(p.a_grid, -1e-12)
-    while idx <= length(p.a_grid) && p.a_grid[idx] < -1e-12
-        idx += 1
-    end
-    idx <= length(p.a_grid) || error("a_grid must contain a nonnegative asset point")
-    return idx
 end
 
 # -----------------------------------------------------------------------------

@@ -222,3 +222,12 @@ function discounted_sum_with_tail(x::AbstractVector{<:Real}, q::Real)
     n = length(x)
     return discounted_sum(x, q) + x[n] * q^n / (1 - q)
 end
+
+function ar1_transition(n::Int, rho::Float64, innovation_mean::Float64,
+                        innovation_sd::Float64, method::Symbol,
+                        tauchen_width::Float64)
+    P = last(quantecon_ar1(n, rho, innovation_mean, innovation_sd;
+                           method = method, width = tauchen_width))
+    validate_transition(P, size(P, 1))
+    return P
+end

@@ -167,3 +167,38 @@ function normalize_labor_grid(h_grid, hMin::Float64, hMax::Float64)
         error("h_grid entries must lie inside [hMin, hMax]")
     return sort(unique(vcat(hMin, grid, hMax)))
 end
+
+function precompute_flow_payoffs(lambda::Float64, first_ap::Vector{Int},
+                                 q_by_ap::Vector{Float64},
+                                 tax_base::Matrix{Float64}, p::AbstractBewleyParams)
+    nA = length(p.a_grid)
+    nZ = length(p.z_grid)
+    nE = length(p.eps_grid)
+    flow_u = fill(-Inf, nA, nA, nZ, nE)
+    flow_h = Array{Float64}(undef, nA, nA, nZ, nE)
+    cash = Array{Float64}(undef, nA, nA)
+
+    @inbounds for ia in 1:nA, iap in 1:nA
+        cash[iap, ia] = p.a_grid[ia] - q_by_ap[iap] * p.a_grid[iap]
+    end
+
+    @inbounds for ia in 1:nA
+        for iz in 1:nZ
+            ia_first = first_ap[iz]
+            for ie in 1:nE
+                income_coeff = lambda * tax_base[iz, ie]
+                for iap in ia_first:nA
+                    cash_iap_ia = cash[iap, ia]
+
+                    u, h = optimal_labor_foc(cash_iap_ia, income_coeff, p)
+                    if isfinite(u)
+                        flow_u[iap, ia, iz, ie] = u
+                        flow_h[iap, ia, iz, ie] = h
+                    end
+                end
+            end
+        end
+    end
+
+    return flow_u, flow_h
+end

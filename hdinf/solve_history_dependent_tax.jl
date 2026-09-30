@@ -68,7 +68,6 @@ export HDParams, HD_SETTINGS, make_history_dependent_params,
        solve_history_dependent_tax, print_hd_equilibrium_summary,
        check_history_independent_limit
 
-const VINFEASIBLE = -1.0e18
 
 # -----------------------------------------------------------------------------
 # Parameters
@@ -950,53 +949,6 @@ function solve_block!(Vcur, policyAIndex, policyH, sc::BlockScratch,
             policyAIndex[ia, is1, is2, iz, ie] = Int32(best_iap)
             policyH[ia, is1, is2, iz, ie] = p.h_grid[best_ih]
         end
-    end
-    return nothing
-end
-
-"""
-    evaluate_block!(Vcur, policyAIndex, policyH, sc, EVz, cash, ie, is1, is2, iz,
-                    m_base, coeff, p)
-
-One policy-evaluation pass over a block: apply the STORED policy and compute the
-resulting value, with no maximization. This is the cheap half of Howard's
-method -- it replaces a search over the nA*nH choice set with a single lookup
-per state, so it costs on the order of 1/(nA*nH) of `solve_block!`.
-
-Mirrors `solve_block!` exactly in how the continuation is formed (bilinear in
-(s1', s2') at the chosen a'), so the two are consistent by construction; a
-mismatch here would show up as Howard converging to the wrong fixed point.
-"""
-function evaluate_block!(Vcur, policyAIndex, policyH, EVz, cash,
-                         ie::Int, is1::Int, is2::Int, iz::Int,
-                         m_base::Float64, coeff::Float64, p::HDParams)
-    nA = size(cash, 1)
-    beta = p.beta
-    util_weight = 1.0 - beta
-
-    @inbounds for ia in 1:nA
-        iap = Int(policyAIndex[ia, is1, is2, iz, ie])
-        h = policyH[ia, is1, is2, iz, ie]
-        c = coeff * h^p.pow + cash[iap, ia]
-        # States below the borrowing limit are infeasible and carry no mass;
-        # `solve_block!` marks them with the finite sentinel rather than -Inf
-        # (which would give 0 * Inf = NaN in the bilinear interpolation), and
-        # policy evaluation must use the same convention or Howard and plain
-        # VFI would converge to different objects on those states.
-        if c <= 0.0
-            Vcur[ia, is1, is2, iz, ie] = VINFEASIBLE
-            continue
-        end
-        u = log(c) - p.phi * h^(1.0 + p.eta) / (1.0 + p.eta)
-
-        s1n = p.mu1 * (m_base + log(h) + p.s1_grid[is1])
-        s2n = p.mu2 * (m_base + log(h) + p.s2_grid[is2])
-        l1, h1, w1 = grid_lookup_weights(p.s1_grid, s1n)
-        l2, h2, w2 = grid_lookup_weights(p.s2_grid, s2n)
-        ev = (1.0 - w1) * ((1.0 - w2) * EVz[iap, l1, l2] + w2 * EVz[iap, l1, h2]) +
-             w1 * ((1.0 - w2) * EVz[iap, h1, l2] + w2 * EVz[iap, h1, h2])
-
-        Vcur[ia, is1, is2, iz, ie] = util_weight * u + beta * ev
     end
     return nothing
 end

@@ -68,30 +68,6 @@ export HDParams, HD_SETTINGS, make_history_dependent_params,
        solve_history_dependent_tax, print_hd_equilibrium_summary,
        check_history_independent_limit
 
-const VINFEASIBLE = -1.0e18
-
-"""
-    access_stationary_distribution(pSS, pHH)
-
-Stationary shares `(piS, piH)` of the two-state asset-market-access chain
-
-    Pr(S'=S | S) = pSS,   Pr(H'=H | H) = pHH,
-
-which is `(1-pHH, 1-pSS) / (2 - pSS - pHH)`. The initial cross-section is drawn
-from this distribution (psmodel.tex), so the hand-to-mouth share is constant
-over the life cycle rather than drifting towards it.
-
-Three parameterizations are nested. `pSS = 1, pHH = 0` makes everyone a saver
-and reproduces `hd` exactly; `pSS = 0, pHH = 1` makes everyone hand-to-mouth;
-`pHH = 1 - pSS` makes access iid with `piH = pHH`.
-"""
-function access_stationary_distribution(pSS::Real, pHH::Real)
-    denom = 2.0 - Float64(pSS) - Float64(pHH)
-    denom > 0.0 || error("pSS = $pSS and pHH = $pHH make the access chain " *
-                         "reducible (2 - pSS - pHH = $denom); the stationary " *
-                         "distribution is not unique")
-    return ((1.0 - Float64(pHH)) / denom, (1.0 - Float64(pSS)) / denom)
-end
 
 # -----------------------------------------------------------------------------
 # Parameters
@@ -794,15 +770,6 @@ function precompute_income_bases(kappa::Float64, p::HDParams)
         wage_base[iz, ie] = exp(log_wage)
     end
     return tax_base, wage_base
-end
-
-function first_nonnegative_asset_index(p::HDParams)
-    idx = searchsortedfirst(p.a_grid, -1e-12)
-    while idx <= length(p.a_grid) && p.a_grid[idx] < -1e-12
-        idx += 1
-    end
-    idx <= length(p.a_grid) || error("a_grid must contain a nonnegative asset point")
-    return idx
 end
 
 # -----------------------------------------------------------------------------
