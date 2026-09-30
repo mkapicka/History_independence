@@ -32,6 +32,7 @@ include("grids.jl")
 include("shocks.jl")
 include("labor.jl")
 include("assets.jl")
+include("statistics.jl")
 include("report.jl")
 
 export
@@ -57,7 +58,12 @@ export
     # assets.jl
     default_asset_grid, asset_choice_bound_tol,
     asset_transition_weights, nearest_asset_index,
+    # statistics.jl
+    AbstractStatsAccumulator, UPPER_BOUND_SHARE_TOL,
+    core_statistics, mpc_statistics,
     # report.jl
-    print_welfare_summary, print_lambda_warnings, eq_flag
+    print_aggregate_statistics, print_upper_bound_warning,
+    print_welfare_summary,
+    print_lambda_warnings, eq_flag
 
 end # module

@@ -267,7 +267,7 @@ function validate(p::HIParams)
     return p
 end
 
-Base.@kwdef mutable struct HIStatsAccumulator
+Base.@kwdef mutable struct HIStatsAccumulator <: AbstractStatsAccumulator
     asset_mass::Vector{Float64}
     distribution_weights::Vector{Float64} = Float64[]
     hours_values::Vector{Float64} = Float64[]
@@ -570,63 +570,6 @@ function print_equilibrium_summary(eq, p::HIParams;
     return nothing
 end
 
-function print_aggregate_statistics(s, p::HIParams; label::AbstractString = "")
-    on_grid = p.asset_choice_method == :grid_search
-    limit_label = on_grid ? "grid borrowing limit / mean labor income" :
-                            "choice borrowing limit / mean labor income"
-    bound_label = on_grid ? "share at effective grid borrowing bound" :
-                            "share at borrowing bound"
-
-    @printf("\n=== Aggregate statistics%s ===\n",
-            isempty(label) ? "" : ": " * label)
-    @printf("mean assets / mean labor income          = %.8f\n",
-            s.meanAssetsToMeanLaborIncome)
-    @printf("median assets / mean labor income        = %.8f\n",
-            s.medianAssetsToMeanLaborIncome)
-    @printf("true borrowing limit / mean labor income = %.8f\n",
-            s.meanBorrowingLimitToMeanLaborIncome)
-    @printf("%-40s = %.8f\n", limit_label,
-            s.meanEffectiveGridBorrowingLimitToMeanLaborIncome)
-    @printf("share negative liquid assets             = %.8f\n",
-            s.shareNegativeLiquidAssets)
-    @printf("%-40s = %.8f\n", bound_label, s.shareAtEffectiveBorrowingConstraint)
-    @printf("share with zero assets                   = %.8f\n", s.shareZeroAssets)
-    @printf("share at upper asset bound               = %.8f\n", s.shareAtAssetUpperBound)
-    @printf("share at hours upper bound               = %.8f\n", s.shareAtHoursUpperBound)
-    # Kaplan-Violante (2022) eq. (2), averaged over the ages this block
-    # covers. The windfall is printed beside it: the consumption function is
-    # concave, so the MPC is only interpretable with the shock size attached.
-    if hasproperty(s, :meanMPC)
-        @printf("average impact MPC                       = %.8f\n", s.meanMPC)
-        @printf("  windfall                               = %.8f  (%.6f of mean labor income)\n",
-                s.mpcShock, s.mpcShockToMeanLaborIncome)
-        @printf("  mean MPC | responders (mpc > 0)        = %.8f\n",
-                s.meanMPCConditionalOnPositive)
-        @printf("  share mpc > 0 / mpc < 0 / mpc = 0      = %.6f / %.6f / %.6f\n",
-                s.shareMPCPositive, s.shareMPCNegative, s.shareMPCZero)
-        if isfinite(s.medianMPC)
-            @printf("  median MPC                             = %.8f\n", s.medianMPC)
-        end
-        @printf("  mean MPC | a < %.6f (%.6f of Y)  = %.8f  over share %.6f\n",
-                s.mpcLowAssetThreshold, s.mpcLowAssetThresholdToMeanLaborIncome,
-                s.meanMPCAtLowAssets, s.shareAtLowAssets)
-        if s.shareMPCExtrapolated > 1e-8
-            @printf("  share extrapolated above the grid      = %.8f   [raise aMax]\n",
-                    s.shareMPCExtrapolated)
-        end
-    end
-    # Only the windowed statistics carry the entry-age block; the all-ages
-    # block is printed through this same function and has no such age.
-    if hasproperty(s, :meanAssetsAtStatsAgeLoToMeanLaborIncome)
-        lo_real = p.age0_real + p.stats_age_lo - 1
-        @printf("mean assets at age %-2d / mean labor income = %.8f\n",
-                lo_real, s.meanAssetsAtStatsAgeLoToMeanLaborIncome)
-        @printf("median assets at age %-2d / mean labor inc. = %.8f\n",
-                lo_real, s.medianAssetsAtStatsAgeLoToMeanLaborIncome)
-    end
-    return nothing
-end
-
 # Failure modes (no bracket, Brent throw, residual above tolerance) are reported
 # with @warn at the point of failure, so eq carries only `converged` beyond the
 # equilibrium objects themselves.
@@ -639,23 +582,6 @@ function attach_elapsed(eq, start_time::Float64, p::HIParams; converged::Bool)
         flush(stdout)
     end
     return eq_out
-end
-
-function print_upper_bound_warning(s)
-    s.upperBoundsBinding || return nothing
-
-    println("WARNING: upper bound is binding.")
-    if s.assetUpperBoundBinding
-        @printf("  asset upper bound       = BINDING (share = %.8e, bound = %.8f, material max a' = %.8f, slack = %.8e)\n",
-                s.shareAtAssetUpperBound, s.assetUpperBound,
-                s.maxMaterialNextAssets, s.assetUpperBoundSlack)
-    end
-    if s.hoursUpperBoundBinding
-        @printf("  hours upper bound       = BINDING (share = %.8e, bound = %.8f, material max h = %.8f, slack = %.8e)\n",
-                s.shareAtHoursUpperBound, s.hoursUpperBound,
-                s.maxMaterialHours, s.hoursUpperBoundSlack)
-    end
-    flush(stdout)
 end
 
 function government_residual_at_lambda(lambda::Float64, p::HIParams)
@@ -1434,108 +1360,15 @@ function finalize_welfare(value_function_by_kappa::Vector{Float64},
     )
 end
 
-function finalize_statistics(stats::HIStatsAccumulator, p::HIParams)
-    total_mass = stats.total_mass
-    mean_assets = stats.sum_current_assets / total_mass
-    mean_labor_income = stats.sum_labor_income / total_mass
-    # Mid-cumulative interpolation rather than StatsBase's weighted-quantile
-    # convention, which is biased low on a coarse nonuniform grid holding a
-    # discretized continuous distribution. See `interpolated_weighted_quantile`
-    # in common/grids.jl for the measured comparison against a known median:
-    # at nA = 151 StatsBase errs by 5.8% of the median and refinement does not
-    # close the gap. Measured on this solver's own distribution at J = 39,
-    # nA = 101, the two conventions differ by 4.6%, against a calibration
-    # target of 0.0498. The infinite-horizon solvers have used this since they
-    # were written; this brings the finite pair into line.
-    median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_mass, 0.5)
-    # The MPC median needs its own sort: `interpolated_weighted_quantile` walks
-    # the grid in order, and MPCs arrive in state order, not value order.
-    median_mpc = if isempty(stats.mpc_values)
-        NaN
-    else
-        ord = sortperm(stats.mpc_values)
-        interpolated_weighted_quantile(stats.mpc_values[ord],
-                                       stats.distribution_weights[ord], 0.5)
-    end
-    # Both limits exist only at ages j = 0,...,J-1, so they are averaged over
-    # the mass of those ages rather than over the whole population.
-    mean_borrowing_limit = safe_ratio(stats.sum_borrowing_limit,
-                                      stats.borrowing_limit_mass)
-    mean_effective_borrowing_limit = safe_ratio(stats.sum_effective_borrowing_limit,
-                                                stats.borrowing_limit_mass)
-    share_at_effective_borrowing_constraint = stats.borrowing_constraint_mass / total_mass
-    share_at_asset_upper_bound = stats.upper_bound_mass / total_mass
-    share_at_hours_upper_bound = stats.hours_upper_bound_mass / total_mass
-    max_material_next_assets =
-        isfinite(stats.max_material_next_assets) ? stats.max_material_next_assets : NaN
-    max_material_hours = isfinite(stats.max_material_hours) ? stats.max_material_hours : NaN
-    asset_upper = asset_upper_bound(p)
-    hours_upper = hours_upper_bound(p)
-    asset_upper_bound_slack = asset_upper - max_material_next_assets
-    hours_upper_bound_slack = hours_upper - max_material_hours
-    asset_upper_bound_binding = share_at_asset_upper_bound > UPPER_BOUND_SHARE_TOL
-    hours_upper_bound_binding = share_at_hours_upper_bound > UPPER_BOUND_SHARE_TOL
-    distributions = (;
-        assetGrid = p.a_grid,
-        assetMass = copy(stats.asset_mass),
-        assetMassTotal = sum(stats.asset_mass),
-        hours = copy(stats.hours_values),
-        consumption = copy(stats.consumption_values),
-        weights = copy(stats.distribution_weights),
-        observationWeightTotal = sum(stats.distribution_weights),
-    )
+"""
+    finalize_statistics(stats, p)
 
-    return (;
-        totalMass = total_mass,
-        meanAssets = mean_assets,
-        medianAssets = median_assets,
-        meanLaborIncome = mean_labor_income,
-        meanBorrowingLimit = mean_borrowing_limit,
-        meanEffectiveGridBorrowingLimit = mean_effective_borrowing_limit,
-        meanAssetsToMeanLaborIncome = safe_ratio(mean_assets, mean_labor_income),
-        medianAssetsToMeanLaborIncome = safe_ratio(median_assets, mean_labor_income),
-        meanBorrowingLimitToMeanLaborIncome = safe_ratio(mean_borrowing_limit, mean_labor_income),
-        meanEffectiveGridBorrowingLimitToMeanLaborIncome =
-            safe_ratio(mean_effective_borrowing_limit, mean_labor_income),
-        shareNegativeLiquidAssets = stats.negative_asset_mass / total_mass,
-        shareAtEffectiveBorrowingConstraint = share_at_effective_borrowing_constraint,
-        shareZeroAssets = stats.zero_asset_mass / total_mass,
-        shareAtAssetUpperBound = share_at_asset_upper_bound,
-        shareAtHoursUpperBound = share_at_hours_upper_bound,
-        # Average impact MPC over whatever ages this accumulator covered, and
-        # the share of its mass whose perturbed state left the top of the grid.
-        meanMPC = safe_ratio(stats.sum_mpc, total_mass),
-        shareMPCExtrapolated = stats.mpc_extrapolated_mass / total_mass,
-        mpcShock = p.mpc_shock,
-        mpcShockToMeanLaborIncome = safe_ratio(p.mpc_shock, mean_labor_income),
-        # The distribution of MPCs, as MPCFinder.m reports it. `medianMPC` needs
-        # the per-observation vector and so is NaN unless collect_distributions
-        # was on; every other measure here is a running sum and always present.
-        meanMPCConditionalOnPositive =
-            safe_ratio(stats.sum_mpc_positive, stats.mpc_positive_mass),
-        shareMPCPositive = stats.mpc_positive_mass / total_mass,
-        shareMPCNegative = stats.mpc_negative_mass / total_mass,
-        shareMPCZero = stats.mpc_zero_mass / total_mass,
-        medianMPC = median_mpc,
-        meanMPCAtLowAssets = safe_ratio(stats.sum_mpc_lowasset, stats.lowasset_mass),
-        shareAtLowAssets = stats.lowasset_mass / total_mass,
-        mpcLowAssetThreshold = p.mpc_lowasset_threshold,
-        mpcLowAssetThresholdToMeanLaborIncome =
-            safe_ratio(p.mpc_lowasset_threshold, mean_labor_income),
-        assetUpperBound = asset_upper,
-        hoursUpperBound = hours_upper,
-        maxMaterialNextAssets = max_material_next_assets,
-        maxMaterialHours = max_material_hours,
-        assetUpperBoundSlack = asset_upper_bound_slack,
-        hoursUpperBoundSlack = hours_upper_bound_slack,
-        assetUpperBoundBinding = asset_upper_bound_binding,
-        hoursUpperBoundBinding = hours_upper_bound_binding,
-        upperBoundsBinding = asset_upper_bound_binding || hours_upper_bound_binding,
-        unconditionalDistributions = distributions,
-    )
-end
+The published statistics for one accumulated group: the shared core, plus
+the impact-MPC block.
+"""
+finalize_statistics(stats::HIStatsAccumulator, p::HIParams) =
+    merge(core_statistics(stats, p), mpc_statistics(stats, p))
 
-const UPPER_BOUND_SHARE_TOL = 1e-8
 function compute_expected_value!(EV, Vnext, p::HIParams)
     nA = length(p.a_grid)
     nZ = length(p.z_grid)

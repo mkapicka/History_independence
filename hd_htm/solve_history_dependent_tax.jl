@@ -687,7 +687,7 @@ end
 # Statistics accumulator (same fields and semantics as the history-independent
 # solver, so downstream statistics are directly comparable)
 # -----------------------------------------------------------------------------
-mutable struct StatsAccumulator
+mutable struct StatsAccumulator <: AbstractStatsAccumulator
     asset_mass::Vector{Float64}
     distribution_weights::Vector{Float64}
     hours_values::Vector{Float64}
@@ -747,79 +747,17 @@ function merge_stats!(dest::StatsAccumulator, src::StatsAccumulator)
     return dest
 end
 
-upper_bound_share_tol() = 1e-8
 function finalize_statistics(stats::StatsAccumulator, p::HDParams)
-    total_mass = stats.total_mass
-    mean_assets = stats.sum_current_assets / total_mass
-    mean_labor_income = stats.sum_labor_income / total_mass
-    # Mid-cumulative interpolation rather than StatsBase's weighted-quantile
-    # convention, which is biased low on a coarse nonuniform grid holding a
-    # discretized continuous distribution. See `interpolated_weighted_quantile`
-    # in common/grids.jl, and NOTES.md for the measured comparison.
-    median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_mass, 0.5)
-    # Both limits exist only at ages j = 0,...,J-1, so they are averaged over
-    # the mass of those ages rather than over the whole population.
-    mean_borrowing_limit = safe_ratio(stats.sum_borrowing_limit,
-                                      stats.borrowing_limit_mass)
-    mean_effective_borrowing_limit = safe_ratio(stats.sum_effective_borrowing_limit,
-                                                stats.borrowing_limit_mass)
-    share_at_effective_borrowing_constraint = stats.borrowing_constraint_mass / total_mass
-    share_hand_to_mouth = stats.htm_mass / total_mass
-    share_at_asset_upper_bound = stats.upper_bound_mass / total_mass
-    share_at_hours_upper_bound = stats.hours_upper_bound_mass / total_mass
+    # The unrestricted maxima, beside the material ones core_statistics
+    # publishes. These are taken over every cell; the material pair is taken
+    # only over cells carrying more than UPPER_BOUND_SHARE_TOL of mass, so a
+    # state sitting at the grid edge with negligible mass shows up here and not
+    # there. Only the hd family publishes both.
     max_next_assets = isfinite(stats.max_next_assets) ? stats.max_next_assets : NaN
     max_hours = isfinite(stats.max_hours) ? stats.max_hours : NaN
-    max_material_next_assets =
-        isfinite(stats.max_material_next_assets) ? stats.max_material_next_assets : NaN
-    max_material_hours = isfinite(stats.max_material_hours) ? stats.max_material_hours : NaN
-    asset_upper = asset_upper_bound(p)
-    hours_upper = hours_upper_bound(p)
-    asset_upper_bound_slack = asset_upper - max_material_next_assets
-    hours_upper_bound_slack = hours_upper - max_material_hours
-    asset_upper_bound_binding = share_at_asset_upper_bound > upper_bound_share_tol()
-    hours_upper_bound_binding = share_at_hours_upper_bound > upper_bound_share_tol()
-    distributions = (;
-        assetGrid = p.a_grid,
-        assetMass = copy(stats.asset_mass),
-        assetMassTotal = sum(stats.asset_mass),
-        hours = copy(stats.hours_values),
-        consumption = copy(stats.consumption_values),
-        weights = copy(stats.distribution_weights),
-        observationWeightTotal = sum(stats.distribution_weights),
-    )
-
-    return (;
-        totalMass = total_mass,
-        meanAssets = mean_assets,
-        medianAssets = median_assets,
-        meanLaborIncome = mean_labor_income,
-        meanBorrowingLimit = mean_borrowing_limit,
-        meanEffectiveGridBorrowingLimit = mean_effective_borrowing_limit,
-        meanAssetsToMeanLaborIncome = safe_ratio(mean_assets, mean_labor_income),
-        medianAssetsToMeanLaborIncome = safe_ratio(median_assets, mean_labor_income),
-        meanBorrowingLimitToMeanLaborIncome =
-            safe_ratio(mean_borrowing_limit, mean_labor_income),
-        meanEffectiveGridBorrowingLimitToMeanLaborIncome =
-            safe_ratio(mean_effective_borrowing_limit, mean_labor_income),
-        shareNegativeLiquidAssets = stats.negative_asset_mass / total_mass,
-        shareAtEffectiveBorrowingConstraint = share_at_effective_borrowing_constraint,
-        shareHandToMouth = share_hand_to_mouth,
-        shareZeroAssets = stats.zero_asset_mass / total_mass,
-        shareAtAssetUpperBound = share_at_asset_upper_bound,
-        shareAtHoursUpperBound = share_at_hours_upper_bound,
-        assetUpperBound = asset_upper,
-        hoursUpperBound = hours_upper,
-        maxNextAssets = max_next_assets,
-        maxHours = max_hours,
-        maxMaterialNextAssets = max_material_next_assets,
-        maxMaterialHours = max_material_hours,
-        assetUpperBoundSlack = asset_upper_bound_slack,
-        hoursUpperBoundSlack = hours_upper_bound_slack,
-        assetUpperBoundBinding = asset_upper_bound_binding,
-        hoursUpperBoundBinding = hours_upper_bound_binding,
-        upperBoundsBinding = asset_upper_bound_binding || hours_upper_bound_binding,
-        unconditionalDistributions = distributions,
-    )
+    return merge(core_statistics(stats, p),
+                 (; maxNextAssets = max_next_assets, maxHours = max_hours,
+                    shareHandToMouth = stats.htm_mass / stats.total_mass))
 end
 
 function finalize_welfare(value_function_by_kappa::Vector{Float64},
@@ -1375,7 +1313,7 @@ averages.
         end
         stats.max_next_assets = max(stats.max_next_assets, ap)
         stats.max_hours = max(stats.max_hours, h)
-        if weighted_mass > upper_bound_share_tol()
+        if weighted_mass > UPPER_BOUND_SHARE_TOL
             stats.max_material_next_assets = max(stats.max_material_next_assets, ap)
             stats.max_material_hours = max(stats.max_material_hours, h)
         end
@@ -1924,56 +1862,6 @@ function print_hd_equilibrium_summary(eq, p::HDParams;
     end
     print_welfare_summary(eq.welfare)
     print_upper_bound_warning(eq.statistics)
-    return nothing
-end
-
-function print_aggregate_statistics(s, p::HDParams; label::AbstractString = "")
-    @printf("\n=== Aggregate statistics%s ===\n",
-            isempty(label) ? "" : ": " * label)
-    @printf("mean assets / mean labor income          = %.8f\n",
-            s.meanAssetsToMeanLaborIncome)
-    @printf("median assets / mean labor income        = %.8f\n",
-            s.medianAssetsToMeanLaborIncome)
-    @printf("true borrowing limit / mean labor income = %.8f\n",
-            s.meanBorrowingLimitToMeanLaborIncome)
-    @printf("grid borrowing limit / mean labor income = %.8f\n",
-            s.meanEffectiveGridBorrowingLimitToMeanLaborIncome)
-    @printf("share negative liquid assets             = %.8f\n",
-            s.shareNegativeLiquidAssets)
-    @printf("share at effective grid borrowing bound  = %.8f\n",
-            s.shareAtEffectiveBorrowingConstraint)
-    # Realized mass in the H state, against the stationary piH the initial
-    # cross-section was drawn from. The two agree at every age; a gap means the
-    # forward pass lost access mass, which nothing else here would reveal.
-    @printf("share hand-to-mouth (target %.6f)    = %.8f\n",
-            p.piH, s.shareHandToMouth)
-    @printf("share with zero assets                   = %.8f\n", s.shareZeroAssets)
-    @printf("share at upper asset bound               = %.8f\n", s.shareAtAssetUpperBound)
-    @printf("share at hours upper bound               = %.8f\n", s.shareAtHoursUpperBound)
-    # Only the windowed statistics carry the entry-age block; the all-ages
-    # block is printed through this same function and has no such age. Same
-    # guard, same two lines, same wording as the other three solvers.
-    if hasproperty(s, :meanAssetsAtStatsAgeLoToMeanLaborIncome)
-        lo_real = p.age0_real + p.stats_age_lo - 1
-        @printf("mean assets at age %-2d / mean labor income = %.8f\n",
-                lo_real, s.meanAssetsAtStatsAgeLoToMeanLaborIncome)
-        @printf("median assets at age %-2d / mean labor inc. = %.8f\n",
-                lo_real, s.medianAssetsAtStatsAgeLoToMeanLaborIncome)
-    end
-    return nothing
-end
-
-function print_upper_bound_warning(s)
-    s.upperBoundsBinding || return nothing
-    @printf("\n=== Upper-bound warning ===\n")
-    if s.assetUpperBoundBinding
-        @printf("asset upper bound binding: bound = %.8f, material max a' = %.8f, slack = %.8e\n",
-                s.assetUpperBound, s.maxMaterialNextAssets, s.assetUpperBoundSlack)
-    end
-    if s.hoursUpperBoundBinding
-        @printf("hours upper bound binding: bound = %.8f, material max h = %.8f, slack = %.8e\n",
-                s.hoursUpperBound, s.maxMaterialHours, s.hoursUpperBoundSlack)
-    end
     return nothing
 end
 
