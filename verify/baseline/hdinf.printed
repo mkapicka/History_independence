@@ -100,6 +100,5 @@ kappa      prob        value function  simulation     difference
 -0.600954  0.16666667  -2.3615386437  -2.3615447636  -6.11988305e-06
 -0.050500  0.66666667  -1.9156446961  -1.9156573160  -1.26199728e-05
  0.499954  0.16666667  -1.4687576104  -1.4687734136  -1.58031575e-05
-
-=== Upper-bound warning ===
-asset upper bound binding: bound = 15.00000000, material max a' = 15.00000000, slack = 0.00000000e+00
+WARNING: upper bound is binding.
+  asset upper bound       = BINDING (share = 2.48505920e-01, bound = 15.00000000, material max a' = 15.00000000, slack = 0.00000000e+00)
