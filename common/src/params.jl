@@ -78,7 +78,24 @@ function first_feasible_asset_indices(kappa::Float64, p::AbstractBewleyParams)
     return idx
 end
 
-# Sentinel value for a choice that violates a constraint, so it can never win a
-# maximization. Large and negative rather than -Inf: an -Inf would propagate
-# through the expectation and poison states that do have feasible choices.
+"""
+    VINFEASIBLE
+
+Value assigned to a state with no feasible choice. FINITE on purpose.
+
+The finite-horizon solver uses `-Inf` here, which is harmless when the value
+function is only ever swept backwards. Under value-function iteration it is not:
+with `-Inf` the comparison `val > best_val` is `-Inf > -Inf`, which is false, so
+no choice is ever selected and the maximizer silently returns its
+initialization -- `best_iap = ia_first`, the LOOSEST borrowing limit at that z.
+The forward pass then puts mass on an asset the next low-z draw cannot service,
+and consumption goes negative.
+
+A finite sentinel makes every comparison well defined, so an infeasible state
+takes the least-bad option instead of an arbitrary index, and `-1e18` dominates
+any attainable utility so such states are never chosen when anything else is
+available. This is the same device `hd` uses (there to avoid `0 * Inf = NaN` in
+the s-interpolation), which is why the infinite-horizon hd solver never hit
+this.
+"""
 const VINFEASIBLE = -1.0e18
