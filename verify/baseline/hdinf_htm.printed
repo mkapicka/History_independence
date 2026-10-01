@@ -12,7 +12,13 @@ Options:
   asset grid dimension nA       = 41
   asset grid bounds             = [-0.427834, 15.000000]
   asset grid method             = :nonuniform  (alternatives: :nonuniform, :linear)
-  bbar                          = -0.17014842731387517
+  beta                          = 0.96                  (discount factor)
+  eta                           = 2.0                   (labor disutility curvature)
+  phi                           = 1.0                   (labor disutility weight)
+  tau                           = 0.181                 (HSV tax progressivity)
+  a0                            = 0.0                   (initial assets at model age 1)
+  rho                           = 0.958                 (AR(1) persistence of z)
+  bbar                          = -0.17014842731387517  (borrowing limit scale)
   pSS (stay saver)              = 0.8882970895          (s in psmodel.tex)
   pHH (stay hand-to-mouth)      = 0.7589294614          (h in psmodel.tex)
   access shares (piS, piH)      = (0.68335794, 0.31664206)
@@ -25,11 +31,13 @@ Options:
   labor history 2 dimension nS2 = 3
   labor history 2 bounds        = [-399.5378, 241.0998]
   labor history 2 grid method   = :linear  (alternatives: :linear, :quantile)
-  qSav                          = 0.9723466284755885
-  qBorr                         = 1.0123473140001613
+  qSav                          = 0.9723466284755885    (price of saving,    a' >= 0)
+  qBorr                         = 1.0123473140001613    (price of borrowing, a' < 0)
+  qGov                          = 0.99                  (government discount price)
   theta0 (implied)              = 0.269711
-  alpha                         = 0.922170
-  mu1, mu2                      = 0.606100, 0.987700
+  alpha                         = 0.9221698113207546    (kernel weight on mu1)
+  mu1                           = 0.6061                (kernel decay 1)
+  mu2                           = 0.9877                (kernel decay 2)
   hours exponent (1-tau)*theta0 = 0.220893
   s_hours_floor                 = 0.0500
   terminal_borrowing            = :zero
@@ -65,9 +73,6 @@ PV consumption             = 273.77444685
 mean output                = 0.77578965
 mean consumption           = 2.66588847
 terminal assets            = 7.36174412
-qSav                       = 0.9723466284755885
-qBorr                      = 1.0123473140001613
-bbar                       = -0.17014842731387517
 theta0 (implied)           = 0.26971121
 s' clamped mass share      = 0.000e+00
 
@@ -82,8 +87,10 @@ share hand-to-mouth (target 0.316642)    = 0.31664206
 share with zero assets                   = 0.03881226
 share at upper asset bound               = 0.24885330
 share at hours upper bound               = 0.00000000
-mean assets at age 22 / mean labor income = 2.22798782
-median assets at age 22 / mean labor inc. = -0.00276605
+
+=== Assets at the initial reporting age: model age 3, real 22 ===
+mean assets / mean labor income          = 2.22798782
+median assets / mean labor income        = -0.00276605
 
 === Aggregate statistics: ages 1-200, real 20-219  [ALL AGES] ===
 mean assets / mean labor income          = 7.13618559

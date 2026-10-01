@@ -17,14 +17,24 @@ Options:
   asset_grid_curvatures       = borrow 1.800, save 2.500
   asset_grid_zero_band        = share 0.300, width 0.080
   asset_grid_bounds           = [-0.502895, 15.000000]
-  bbar                        = -0.2
+  beta                        = 0.96                  (discount factor)
+  eta                         = 2.0                   (labor disutility curvature)
+  phi                         = 1.0                   (labor disutility weight)
+  tau                         = 0.181                 (HSV tax progressivity)
+  a0                          = 0.0                   (initial assets at model age 1)
+  rho                         = 0.958                 (AR(1) persistence of z)
+  sigma_omega                 = 0.130384048104053     (s.d. of the persistent innovation)
+  sigma_epsilon               = 0.28460498941515416   (s.d. of the transitory shock)
+  sigma_kappa                 = 0.3178049716414141    (s.d. of the fixed effect)
+  z_initial                   = 0.0                   (z at model age 1)
+  bbar                        = -0.2                  (borrowing limit scale)
   pSS (stay saver)            = 0.8882970895          (s in psmodel.tex)
   pHH (stay hand-to-mouth)    = 0.7589294614          (h in psmodel.tex)
   access shares (piS, piH)    = (0.68335794, 0.31664206)
   qSav                        = 0.99                  (price of saving,    a' >= 0)
   qBorr                       = 0.97                  (price of borrowing, a' < 0)
-  qGov                        = 0.990000              (government discount price)
-  G                           = 0.000000              (government spending)
+  qGov                        = 0.99                  (government discount price)
+  G                           = 0.0                   (government spending)
   asset_choice_method         = :grid_search  (alternatives: :grid_search, :interpolate)
   labor_solver                = :hybrid_newton  (alternatives: :brent, :hybrid_newton, :grid)
   labor_bounds                = [1.00e-08, 5.0000]
@@ -57,9 +67,6 @@ PV consumption             = 86.32147765
 mean output                = 0.85921583
 mean consumption           = 0.86014557
 settled assets             = 0.12933589
-qSav                       = 0.99
-qBorr                      = 0.97
-bbar                       = -0.2
 
 === Aggregate statistics: ages 3-40, real 22-59  [CALIBRATION WINDOW] ===
 mean assets / mean labor income          = 0.14040829
@@ -72,8 +79,10 @@ share hand-to-mouth (target 0.316642)    = 0.31664206
 share with zero assets                   = 0.18637684
 share at upper asset bound               = 0.00000000
 share at hours upper bound               = 0.00000000
-mean assets at age 22 / mean labor income = 0.06318217
-median assets at age 22 / mean labor inc. = 0.00338472
+
+=== Assets at the initial reporting age: model age 3, real 22 ===
+mean assets / mean labor income          = 0.06318217
+median assets / mean labor income        = 0.00338472
 
 === Aggregate statistics: ages 1-200, real 20-219  [ALL AGES] ===
 mean assets / mean labor income          = 0.14858562

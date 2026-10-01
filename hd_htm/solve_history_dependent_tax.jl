@@ -1334,7 +1334,17 @@ function print_solver_options(p::HDParams)
             String(p.asset_grid_method))
     # Calibrated inputs print with every digit (shortest representation that
     # round-trips to the same Float64) so they can be copied back verbatim.
-    @printf("  bbar                          = %s\n", p.bbar)
+    @printf("  beta                          = %-20s  (discount factor)\n", p.beta)
+    @printf("  eta                           = %-20s  (labor disutility curvature)\n", p.eta)
+    @printf("  phi                           = %-20s  (labor disutility weight)\n", p.phi)
+    @printf("  tau                           = %-20s  (HSV tax progressivity)\n", p.tau)
+    @printf("  a0                            = %-20s  (initial assets at model age 1)\n", p.a0)
+    @printf("  rho                           = %-20s  (AR(1) persistence of z)\n", p.rho)
+    # sigma_omega, sigma_epsilon, sigma_kappa and z_initial are settings that
+    # build the grids rather than fields of HDParams, so they cannot be reported
+    # here without widening the struct. The grids they produced are summarized
+    # by their dimensions above.
+    @printf("  bbar                          = %-20s  (borrowing limit scale)\n", p.bbar)
     @printf("  labor grid size               = %d on [%.4f, %.4f]\n",
             length(p.h_grid), p.hMin, p.hMax)
     @printf("  labor grid spacing            = :%s  (alternatives: :log, :uniform)\n",
@@ -1351,11 +1361,13 @@ function print_solver_options(p::HDParams)
             p.s2_grid[1], p.s2_grid[end])
     @printf("  labor history 2 grid method   = :%s  (alternatives: :linear, :quantile)\n",
             String(p.s_grid_method))
-    @printf("  qSav                          = %s\n", p.qSav)
-    @printf("  qBorr                         = %s\n", p.qBorr)
+    @printf("  qSav                          = %-20s  (price of saving,    a' >= 0)\n", p.qSav)
+    @printf("  qBorr                         = %-20s  (price of borrowing, a' < 0)\n", p.qBorr)
+    @printf("  qGov                          = %-20s  (government discount price)\n", p.qGov)
     @printf("  theta0 (implied)              = %.6f\n", p.theta0)
-    @printf("  alpha                         = %.6f\n", p.alpha)
-    @printf("  mu1, mu2                      = %.6f, %.6f\n", p.mu1, p.mu2)
+    @printf("  alpha                         = %-20s  (kernel weight on mu1)\n", p.alpha)
+    @printf("  mu1                           = %-20s  (kernel decay 1)\n", p.mu1)
+    @printf("  mu2                           = %-20s  (kernel decay 2)\n", p.mu2)
     @printf("  hours exponent (1-tau)*theta0 = %.6f\n", p.pow)
     @printf("  s_hours_floor                 = %.4f\n", p.s_hours_floor)
     @printf("  terminal_borrowing            = :zero\n")
@@ -1377,11 +1389,9 @@ function print_hd_equilibrium_summary(eq, p::HDParams;
     @printf("mean output                = %.8f\n", mean(eq.Y))
     @printf("mean consumption           = %.8f\n", mean(eq.C))
     @printf("terminal assets            = %.8f\n", eq.A[end])
-    # Printed with every digit (shortest representation that round-trips to
-    # the same Float64), so calibrated values can be copied back verbatim.
-    @printf("qSav                       = %s\n", p.qSav)
-    @printf("qBorr                      = %s\n", p.qBorr)
-    @printf("bbar                       = %s\n", p.bbar)
+    # The inputs -- beta, bbar and the three prices -- are NOT repeated here.
+    # They are printed once, with every digit, in the options panel at the top of
+    # the run, so this panel carries only what the solve produced.
     @printf("theta0 (implied)           = %.8f\n", p.theta0)
     @printf("pSS / pHH                  = %.8f / %.8f   (piH = %.8f)%s\n",
             p.pSS, p.pHH, p.piH,

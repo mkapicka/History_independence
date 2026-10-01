@@ -568,7 +568,17 @@ function print_solver_options(p::HIParams)
             minimum(p.a_grid), maximum(p.a_grid))
     # Calibrated inputs print with every digit (shortest representation that
     # round-trips to the same Float64) so they can be copied back verbatim.
-    @printf("  bbar                        = %s\n", p.bbar)
+    @printf("  beta                        = %-20s  (discount factor)\n", p.beta)
+    @printf("  eta                         = %-20s  (labor disutility curvature)\n", p.eta)
+    @printf("  phi                         = %-20s  (labor disutility weight)\n", p.phi)
+    @printf("  tau                         = %-20s  (HSV tax progressivity)\n", p.tau)
+    @printf("  a0                          = %-20s  (initial assets at model age 1)\n", p.a0)
+    @printf("  rho                         = %-20s  (AR(1) persistence of z)\n", p.rho)
+    @printf("  sigma_omega                 = %-20s  (s.d. of the persistent innovation)\n", p.sigma_omega)
+    @printf("  sigma_epsilon               = %-20s  (s.d. of the transitory shock)\n", p.sigma_epsilon)
+    @printf("  sigma_kappa                 = %-20s  (s.d. of the fixed effect)\n", p.sigma_kappa)
+    @printf("  z_initial                   = %-20s  (z at model age 1)\n", p.z_initial)
+    @printf("  bbar                        = %-20s  (borrowing limit scale)\n", p.bbar)
     @printf("  pSS (stay saver)            = %-20s  (s in psmodel.tex)\n", p.pSS)
     @printf("  pHH (stay hand-to-mouth)    = %-20s  (h in psmodel.tex)\n", p.pHH)
     @printf("  access shares (piS, piH)    = (%.8f, %.8f)%s\n",
@@ -576,8 +586,8 @@ function print_solver_options(p::HIParams)
             p.piH == 0.0 ? "   [NO HtM AGENTS: this is the hiinf model]" : "")
     @printf("  qSav                        = %-20s  (price of saving,    a' >= 0)\n", p.qSav)
     @printf("  qBorr                       = %-20s  (price of borrowing, a' < 0)\n", p.qBorr)
-    @printf("  qGov                        = %-20.6f  (government discount price)\n", p.qGov)
-    @printf("  G                           = %-20.6f  (government spending)\n", p.G)
+    @printf("  qGov                        = %-20s  (government discount price)\n", p.qGov)
+    @printf("  G                           = %-20s  (government spending)\n", p.G)
     @printf("  asset_choice_method         = :%s  (alternatives: :grid_search, :interpolate)\n",
             String(p.asset_choice_method))
     if p.asset_choice_method == :interpolate
@@ -621,11 +631,9 @@ function print_equilibrium_summary(eq, p::HIParams;
     # is carried forward at, not a terminal condition. Before the profiles were
     # padded this printed 0.0 -- the untouched tail of `zeros(maxAge)`.
     @printf("settled assets             = %.8f\n", eq.A[end])
-    # Printed with every digit (shortest representation that round-trips to
-    # the same Float64), so calibrated values can be copied back verbatim.
-    @printf("qSav                       = %s\n", p.qSav)
-    @printf("qBorr                      = %s\n", p.qBorr)
-    @printf("bbar                       = %s\n", p.bbar)
+    # The inputs -- beta, bbar and the three prices -- are NOT repeated here.
+    # They are printed once, with every digit, in the options panel at the top of
+    # the run, so this panel carries only what the solve produced.
     if hasproperty(eq, :elapsedSeconds)
         @printf("solve time                 = %.3f seconds\n", eq.elapsedSeconds)
     end

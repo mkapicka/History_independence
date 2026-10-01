@@ -401,8 +401,8 @@ function print_beta_calibration_result(result)
     @printf("converged                = %s%s (%d sweeps, %d solves, %.1f s)\n",
             result.converged, result.stalled ? " [STALLED]" : "",
             result.sweeps, result.nSolves, result.elapsedSeconds)
-    @printf("beta                       = %.10f\n", result.beta)
-    @printf("bbar                       = %.10f\n", result.bbar)
+    @printf("beta                       = %s\n", result.beta)
+    @printf("bbar                       = %s\n", result.bbar)
     @printf("qSav / qBorr / qGov (given) = %.6f / %.6f / %.6f\n",
             result.qSav, result.qBorr, result.qGov)
     @printf("pSS / pHH (given)           = %.6f / %.6f   (piH = %.6f)\n",

@@ -10,3 +10,9 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 QuantEcon = "fcd29c91-0bd7-5a09-975d-7ac3f643a60c"
 Roots = "f2b01f46-fcfa-551c-844a-d8ac1e96c665"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]

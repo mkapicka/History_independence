@@ -13,11 +13,21 @@ Options:
   asset_grid_curvatures       = borrow 1.800, save 2.500
   asset_grid_zero_band        = share 0.300, width 0.080
   asset_grid_bounds           = [-0.502895, 15.000000]
-  bbar                        = -0.2
+  beta                        = 0.96                  (discount factor)
+  eta                         = 2.0                   (labor disutility curvature)
+  phi                         = 1.0                   (labor disutility weight)
+  tau                         = 0.181                 (HSV tax progressivity)
+  a0                          = 0.0                   (initial assets at model age 1)
+  rho                         = 0.958                 (AR(1) persistence of z)
+  sigma_omega                 = 0.130384048104053     (s.d. of the persistent innovation)
+  sigma_epsilon               = 0.28460498941515416   (s.d. of the transitory shock)
+  sigma_kappa                 = 0.3178049716414141    (s.d. of the fixed effect)
+  z_initial                   = 0.0                   (z at model age 1)
+  bbar                        = -0.2                  (borrowing limit scale)
   qSav                        = 0.99                  (price of saving,    a' >= 0)
   qBorr                       = 0.97                  (price of borrowing, a' < 0)
-  qGov                        = 0.990000              (government discount price)
-  G                           = 0.000000              (government spending)
+  qGov                        = 0.99                  (government discount price)
+  G                           = 0.0                   (government spending)
   asset_choice_method         = :grid_search  (alternatives: :grid_search, :interpolate)
   labor_solver                = :hybrid_newton  (alternatives: :brent, :hybrid_newton, :grid)
   labor_bounds                = [1.00e-08, 5.0000]
@@ -42,9 +52,6 @@ PV consumption             = 29.21499752
 mean output                = 0.88125785
 mean consumption           = 0.88287538
 terminal assets            = 0.00000000
-qSav                       = 0.99
-qBorr                      = 0.97
-bbar                       = -0.2
 
 === Aggregate statistics: model ages 3-40, real 22-59  [CALIBRATION WINDOW] ===
 mean assets / mean labor income          = 0.18929204
@@ -59,11 +66,13 @@ share at hours upper bound               = 0.00000000
 average impact MPC                       = 0.38267515
   windfall                               = 0.00632780  (0.007189 of mean labor income)
   mean MPC | responders (mpc > 0)        = 0.47438467
-  share mpc > 0 / mpc < 0 / mpc = 0      = 0.923511 / 0.076489 / 0.000000
+  share mpc positive / negative / zero   = 0.923511 / 0.076489 / 0.000000
   median MPC                             = 0.40299912
-  mean MPC | a < 0.012656 (0.014378 of Y)  = 0.48050322  over share 0.441507
-mean assets at age 22 / mean labor income = 0.10323688
-median assets at age 22 / mean labor inc. = 0.00843759
+  mean MPC | low liquid assets           = 0.48050322  (a < 0.012656 = 0.014378 of Y, over share 0.441507)
+
+=== Assets at the initial reporting age: model age 3, real 22 ===
+mean assets / mean labor income          = 0.10323688
+median assets / mean labor income        = 0.00843759
 
 === Aggregate statistics: model ages 1-40, real 20-59  [ALL AGES] ===
 mean assets / mean labor income          = 0.18108135
@@ -78,8 +87,8 @@ share at hours upper bound               = 0.00000000
 average impact MPC                       = 0.39228567
   windfall                               = 0.00632780  (0.007180 of mean labor income)
   mean MPC | responders (mpc > 0)        = 0.48309369
-  share mpc > 0 / mpc < 0 / mpc = 0      = 0.925306 / 0.074694 / 0.000000
-  mean MPC | a < 0.012656 (0.014361 of Y)  = 0.49385368  over share 0.462535
+  share mpc positive / negative / zero   = 0.925306 / 0.074694 / 0.000000
+  mean MPC | low liquid assets           = 0.49385368  (a < 0.012656 = 0.014361 of Y, over share 0.462535)
 
 === Welfare ===
 overall value function utility = -0.3924125646

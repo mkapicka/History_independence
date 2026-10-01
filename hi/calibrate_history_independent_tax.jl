@@ -361,9 +361,9 @@ function print_calibration_result(result)
     println("\n=== Calibration result ===")
     @printf("converged                = %s (after %d sweep(s), maxgap=%.2e)\n",
             result.converged, result.sweeps, max_abs_resid(m, t))
-    @printf("qSav                     = %.8f\n", result.qSav)
-    @printf("qBorr                    = %.8f\n", result.qBorr)
-    @printf("bbar                     = %.8f\n", result.bbar)
+    @printf("qSav                     = %s\n", result.qSav)
+    @printf("qBorr                    = %s\n", result.qBorr)
+    @printf("bbar                     = %s\n", result.bbar)
     @printf("%-24s = %.8f  (target %.6f, resid % .2e)\n",
             targeted, asset_ratio(m, t), asset_target(t),
             r.assetsToMeanLaborIncome)

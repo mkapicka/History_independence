@@ -78,11 +78,9 @@ function print_equilibrium_summary(eq, p::AbstractBewleyParams;
     @printf("mean output                = %.8f\n", mean(eq.Y))
     @printf("mean consumption           = %.8f\n", mean(eq.C))
     @printf("terminal assets            = %.8f\n", eq.A[end])
-    # Printed with every digit (shortest representation that round-trips to
-    # the same Float64), so calibrated values can be copied back verbatim.
-    @printf("qSav                       = %s\n", p.qSav)
-    @printf("qBorr                      = %s\n", p.qBorr)
-    @printf("bbar                       = %s\n", p.bbar)
+    # The inputs -- beta, bbar and the three prices -- are NOT repeated here.
+    # They are printed once, with every digit, in the options panel at the top of
+    # the run, so this panel carries only what the solve produced.
     if hasproperty(eq, :elapsedSeconds)
         @printf("solve time                 = %.3f seconds\n", eq.elapsedSeconds)
     end

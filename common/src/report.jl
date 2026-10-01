@@ -72,27 +72,35 @@ function print_aggregate_statistics(s, p::AbstractBewleyParams;
                 s.mpcShock, s.mpcShockToMeanLaborIncome)
         @printf("  mean MPC | responders (mpc > 0)        = %.8f\n",
                 s.meanMPCConditionalOnPositive)
-        @printf("  share mpc > 0 / mpc < 0 / mpc = 0      = %.6f / %.6f / %.6f\n",
+        @printf("  share mpc positive / negative / zero   = %.6f / %.6f / %.6f\n",
                 s.shareMPCPositive, s.shareMPCNegative, s.shareMPCZero)
         if isfinite(s.medianMPC)
             @printf("  median MPC                             = %.8f\n", s.medianMPC)
         end
-        @printf("  mean MPC | a < %.6f (%.6f of Y)  = %.8f  over share %.6f\n",
-                s.mpcLowAssetThreshold, s.mpcLowAssetThresholdToMeanLaborIncome,
-                s.meanMPCAtLowAssets, s.shareAtLowAssets)
+        # The threshold and the share sit to the RIGHT of the '=' rather than in
+        # the label: they vary in width, and inside the label they moved the
+        # column with them.
+        @printf("  mean MPC | low liquid assets           = %.8f  (a < %.6f = %.6f of Y, over share %.6f)\n",
+                s.meanMPCAtLowAssets, s.mpcLowAssetThreshold,
+                s.mpcLowAssetThresholdToMeanLaborIncome, s.shareAtLowAssets)
         if s.shareMPCExtrapolated > 1e-8
             @printf("  share extrapolated above the grid      = %.8f   [raise aMax]\n",
                     s.shareMPCExtrapolated)
         end
     end
-    # Only the windowed statistics carry the entry-age block; the all-ages
-    # block is printed through this same function and has no such age.
+    # Only the windowed statistics carry the entry-age figures; the all-ages
+    # block is printed through this same function and has no such age. They get
+    # their own panel: they are a cross-section at one age, not an average over
+    # the window like everything above, and putting the age in the header lets
+    # the labels match the main block instead of running two characters wider.
     if hasproperty(s, :meanAssetsAtStatsAgeLoToMeanLaborIncome)
         lo_real = p.age0_real + p.stats_age_lo - 1
-        @printf("mean assets at age %-2d / mean labor income = %.8f\n",
-                lo_real, s.meanAssetsAtStatsAgeLoToMeanLaborIncome)
-        @printf("median assets at age %-2d / mean labor inc. = %.8f\n",
-                lo_real, s.medianAssetsAtStatsAgeLoToMeanLaborIncome)
+        @printf("\n=== Assets at the initial reporting age: model age %d, real %d ===\n",
+                p.stats_age_lo, lo_real)
+        @printf("mean assets / mean labor income          = %.8f\n",
+                s.meanAssetsAtStatsAgeLoToMeanLaborIncome)
+        @printf("median assets / mean labor income        = %.8f\n",
+                s.medianAssetsAtStatsAgeLoToMeanLaborIncome)
     end
     return nothing
 end
