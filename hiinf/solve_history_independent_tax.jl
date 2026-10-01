@@ -17,10 +17,8 @@ using Roots
 using StatsBase
 
 # -----------------------------------------------------------------------------
-# Shared infrastructure. Included rather than imported, so the methods land in
-# THIS module's scope exactly as when they were written out inline here.
-# grids.jl first: shocks.jl uses nearest_index, normalize_probabilities and
-# validate_transition from it.
+# Shared infrastructure: the BewleyCommon package at ../common. The second line
+# imports the unexported, family-specific functions this solver takes from it.
 # -----------------------------------------------------------------------------
 using BewleyCommon
 using BewleyCommon: finalize_welfare, precompute_income_bases
@@ -831,7 +829,7 @@ function solve_policy_age_interpolated!(Vcur, policyAIndex, policyA, policyH,
     @inbounds for ia in 1:nA
         a = p.a_grid[ia]
         for iz in 1:nZ
-            lower = asset_choice_lower_bound(kappa, iz, p)
+            lower = borrowing_limit(kappa, iz, p)
             for ie in 1:nE
                 income_coeff = lambda * tax_base[iz, ie]
                 best_val, best_ap, best_iap, best_h = interpolated_asset_choice(
@@ -984,7 +982,7 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                 else
                     ap = policyA[ia, iz, ie]
                     q_ap = asset_price(ap, p)
-                    lower_ap = asset_choice_lower_bound(kappa, iz, p)
+                    lower_ap = borrowing_limit(kappa, iz, p)
                     at_borrowing_constraint =
                         abs(ap - lower_ap) <= asset_choice_bound_tol(lower_ap, p)
                     at_asset_upper =
@@ -1234,12 +1232,6 @@ nothing else.
 """
 finalize_statistics(stats::HIStatsAccumulator, p::HIParams) =
     core_statistics(stats, p)
-
-# Infinite horizon: the borrowing limit binds at every age. The finite solver
-# replaces it with a' >= 0 at the terminal age; there is no terminal age here.
-function asset_choice_lower_bound(kappa::Float64, iz::Int, p::HIParams)
-    return borrowing_limit(kappa, iz, p)
-end
 
 ar1_grid(n::Int, rho::Float64, innovation_mean::Float64, innovation_sd::Float64,
          method::Symbol, tauchen_width::Float64) =

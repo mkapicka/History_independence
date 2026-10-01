@@ -1,31 +1,23 @@
 # =============================================================================
-# common/shocks.jl
+# shocks.jl
 #
-# Shock discretization and interpolation helpers shared by ALL EIGHT solvers.
-# Until 2026-09-29 the hi family carried its own copies of quantecon_ar1,
-# ar1_conditional_probabilities, normal_gauss_hermite and normal_cdf; they were
-# byte-identical to these (quantecon_ar1 up to one temp variable), so the copies
-# were deleted and this file is now included by the hi family too. See
-# common/grids.jl for the rest, and note that build_labor_grid here is NOT the
-# hi family's: theirs is a 3-argument uniform grid, this one is 4-argument and
-# log-spaced by default.
+# Shock discretization and interpolation helpers shared by all eight solvers:
+# AR(1) and iid-normal discretization, the normal CDF, the clamped lookup
+# `grid_lookup_weights`, the root bracket, and the tail-closed discounted sum.
 #
-# `normal_cdf` here is the deduplicated version. Both hd and hdinf previously
-# defined it TWICE -- once taking ::Float64 (Abramowitz and Stegun 26.2.17) and
-# once taking ::Real (QuantEcon) -- so which implementation ran depended
-# silently on the argument type, and the two disagreed by 5.6e-9.
+# `build_labor_grid` here is the hd family's: 4-argument and log-spaced by
+# default. It is unexported because the hi family's `uniform_labor_grid` in
+# labor.jl is a different function; call it as BewleyCommon.build_labor_grid.
 #
-# The extraction originally kept the A&S method, widened to ::Real. That was the
-# wrong one of the two to keep: it is accurate to 7.5e-8, and `z0_probs` -- which
-# `build_markov_shock` below produces, and which seeds the forward pass and
-# weights the birth value function -- is built with it. As of 2026-09-19 the
-# QuantEcon branch is what survives, matching `hi`/`hiinf` byte for byte. See the
-# docstring at `normal_cdf` for the measurement. This DOES move every hd-family
-# number in about the ninth digit relative to runs made before that date.
+# `normal_cdf` is QuantEcon.std_norm_cdf. Until 2026-09-19 the hd family used
+# the Zelen-Severo rational approximation here (maximum error 7.5e-8), and the
+# docstring below records why that mattered: `build_markov_shock` builds
+# `z0_probs` with it, which seeds the forward pass. Every hd-family number from
+# before that date differs from a rerun in about the ninth digit.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Shock discretization (replicated infrastructure)
+# Shock discretization
 # -----------------------------------------------------------------------------
 function build_markov_shock(name::String, n::Int, rho::Float64,
                             innovation_mean::Float64, innovation_sd::Float64,

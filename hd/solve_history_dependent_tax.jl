@@ -1,5 +1,5 @@
 # =============================================================================
-# solve_history_dependent_tax.jl  --  STANDALONE
+# solve_history_dependent_tax.jl
 #
 # Marek Kapicka, 2026
 #
@@ -25,9 +25,9 @@
 # history-independent model exactly (use nS1 = nS2 = 1).
 #
 # -----------------------------------------------------------------------------
-# Self-contained: it does not include or call the history-independent code. All
-# shared infrastructure is replicated inside the module `HistoryDependentTax`,
-# so the two codebases can be loaded in the same session. Exported API:
+# Wrapped in its own module so it can be loaded beside the history-independent
+# code in one session; the shared infrastructure comes from the BewleyCommon
+# package at ../common. Exported API:
 #
 #   HDParams, HD_SETTINGS, make_history_dependent_params,
 #   solve_history_dependent_tax, print_hd_equilibrium_summary,
@@ -63,8 +63,8 @@ using StatsBase
 # subtypes AbstractBewleyParams.
 # -----------------------------------------------------------------------------
 using BewleyCommon
-using BewleyCommon: BlockScratch, build_s_grid, initial_asset_weights,
-    s_stock_moments, solve_block!
+using BewleyCommon: BlockScratch, build_s_grid, finalize_welfare,
+    initial_asset_weights, s_stock_moments, solve_block!
 
 export HDParams, HD_SETTINGS, make_history_dependent_params,
        solve_history_dependent_tax, print_hd_equilibrium_summary,
@@ -368,32 +368,6 @@ function HDParams(;
     )
 end
 
-"""
-    S_GRID_UNIFORM_BLEND
-
-Weight on a uniform when placing `:quantile` s-grid nodes, so that the outermost
-cells stay bounded instead of spanning most of the reachable range. Tuned on the
-baseline roots (mu1 = 0.6061, mu2 = 0.9877, J = 39), welfare error against an
-nS2 = 401 reference, as a multiple of the `:linear` error at the same nS2
-(higher is better, and below 1.0 means worse than equal spacing):
-
-    blend w     nS2=7    nS2=15    nS2=31    nS2=61   clamped at nS2=61
-      0.00      0.90x     0.80x     2.41x    11.16x        3.7e-04
-      0.05      0.91x     0.96x     4.52x    43.01x        4e-05
-      0.15      1.14x     1.56x    11.96x    61.94x        9e-09
-      0.30      1.35x     3.75x    12.64x    74.96x        3e-14
-      0.50       --        --        --      27.57x        0
-
-Improvement is monotone in w up to 0.30 and then reverses -- by w = 0.50 enough
-points have been pulled back into the tails that the gain at nS2 = 61 falls from
-75x to 28x. Pure quantile spacing (w = 0) is worse than equal spacing at
-nS2 <= 15, for the reason documented at the blend itself. w is a constant rather
-than a setting because it trades one kind of grid error against another with no
-economic content.
-"""
-const S_GRID_UNIFORM_BLEND = 0.30
-
-
 
 # -----------------------------------------------------------------------------
 # Statistics accumulator (same fields and semantics as the history-independent
@@ -467,26 +441,6 @@ function finalize_statistics(stats::StatsAccumulator, p::HDParams)
     max_hours = isfinite(stats.max_hours) ? stats.max_hours : NaN
     return merge(core_statistics(stats, p),
                  (; maxNextAssets = max_next_assets, maxHours = max_hours))
-end
-
-function finalize_welfare(value_function_by_kappa::Vector{Float64},
-                          simulation_by_kappa::Vector{Float64},
-                          p::HDParams)
-    difference_by_kappa = simulation_by_kappa .- value_function_by_kappa
-    overall_value_function = dot(p.Pkappa, value_function_by_kappa)
-    overall_simulation = dot(p.Pkappa, simulation_by_kappa)
-    overall_difference = overall_simulation - overall_value_function
-    return (;
-        kappaGrid = p.kappa_grid,
-        kappaProbabilities = p.Pkappa,
-        valueFunctionByKappa = value_function_by_kappa,
-        simulationByKappa = simulation_by_kappa,
-        differenceByKappa = difference_by_kappa,
-        overallValueFunction = overall_value_function,
-        overallSimulation = overall_simulation,
-        overallDifference = overall_difference,
-        maxAbsDifferenceByKappa = maximum(abs.(difference_by_kappa)),
-    )
 end
 
 # -----------------------------------------------------------------------------

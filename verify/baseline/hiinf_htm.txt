@@ -119,6 +119,7 @@ welfare.kappaProbabilities.first = 0.16666666666666693
 welfare.kappaProbabilities.last = 0.16666666666666693
 welfare.kappaProbabilities.length = 3
 welfare.kappaProbabilities.sum = 1.0
+welfare.maxAbsDifferenceByKappa = 2.1545710604531365e-7
 welfare.overallDifference = -8.712995602788709e-8
 welfare.overallSimulation = -0.5070071717962203
 welfare.overallValueFunction = -0.5070070846662643

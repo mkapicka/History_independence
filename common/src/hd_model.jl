@@ -92,6 +92,31 @@ function s_stock_moments(mu::Real, J::Int; alpha, mu1, mu2, theta0, beta, rho,
 end
 
 """
+    S_GRID_UNIFORM_BLEND
+
+Weight on a uniform when placing `:quantile` s-grid nodes, so that the outermost
+cells stay bounded instead of spanning most of the reachable range. Tuned on the
+baseline roots (mu1 = 0.6061, mu2 = 0.9877, J = 39), welfare error against an
+nS2 = 401 reference, as a multiple of the `:linear` error at the same nS2
+(higher is better, and below 1.0 means worse than equal spacing):
+
+    blend w     nS2=7    nS2=15    nS2=31    nS2=61   clamped at nS2=61
+      0.00      0.90x     0.80x     2.41x    11.16x        3.7e-04
+      0.05      0.91x     0.96x     4.52x    43.01x        4e-05
+      0.15      1.14x     1.56x    11.96x    61.94x        9e-09
+      0.30      1.35x     3.75x    12.64x    74.96x        3e-14
+      0.50       --        --        --      27.57x        0
+
+Improvement is monotone in w up to 0.30 and then reverses -- by w = 0.50 enough
+points have been pulled back into the tails that the gain at nS2 = 61 falls from
+75x to 28x. Pure quantile spacing (w = 0) is worse than equal spacing at
+nS2 <= 15, for the reason documented at the blend itself. w is a constant rather
+than a setting because it trades one kind of grid error against another with no
+economic content.
+"""
+const S_GRID_UNIFORM_BLEND = 0.30
+
+"""
     build_s_grid(mu, nS, J, kappa_grid, z_grid, eps_grid, s_hours_floor, hMax)
 
 Linear grid for one past-income stock, spanning the range REACHABLE in a

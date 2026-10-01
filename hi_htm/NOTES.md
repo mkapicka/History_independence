@@ -415,7 +415,7 @@ Anchor: `median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_ma
     # Mid-cumulative interpolation rather than StatsBase's weighted-quantile
     # convention, which is biased low on a coarse nonuniform grid holding a
     # discretized continuous distribution. See `interpolated_weighted_quantile`
-    # in common/grids.jl for the measured comparison against a known median:
+    # in common/src/grids.jl for the measured comparison against a known median:
     # at nA = 151 StatsBase errs by 5.8% of the median and refinement does not
     # close the gap. Measured on this solver's own distribution at J = 39,
     # nA = 101, the two conventions differ by 4.6%, against a calibration

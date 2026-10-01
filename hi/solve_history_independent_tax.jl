@@ -18,10 +18,8 @@ using Roots
 using StatsBase
 
 # -----------------------------------------------------------------------------
-# Shared infrastructure. Included rather than imported, so the methods land in
-# THIS module's scope exactly as when they were written out inline here.
-# grids.jl first: shocks.jl uses nearest_index, normalize_probabilities and
-# validate_transition from it.
+# Shared infrastructure: the BewleyCommon package at ../common. The second line
+# imports the unexported, family-specific functions this solver takes from it.
 # -----------------------------------------------------------------------------
 using BewleyCommon
 using BewleyCommon: asset_choice_lower_bound, finalize_welfare,

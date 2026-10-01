@@ -115,15 +115,15 @@ test -d "$JULIA_DEPOT_PATH/packages" || {
 # Stage the code onto the node-local scratch disk
 # -----------------------------------------------------------------------------
 test -n "$SCRATCHDIR" || { echo "ERROR: SCRATCHDIR is not set" >&2; exit 1; }
-# The solver includes ../common/*.jl, so scratch must reproduce that layout:
-# the code goes in $SCRATCHDIR/run and the shared helpers in $SCRATCHDIR/common,
-# leaving @__DIR__/.. pointing where the include expects. Copying everything
-# flat into $SCRATCHDIR (as this did before common/ existed) makes the include
+# The Manifest records the shared package BewleyCommon as a dev dependency at
+# the relative path ../common, so scratch must reproduce that layout: the code
+# goes in $SCRATCHDIR/run and the package (its Project.toml and src/) in
+# $SCRATCHDIR/common. Copying everything flat into $SCRATCHDIR makes the path
 # resolve ABOVE the scratch directory and every task dies at load time.
 mkdir -p "$SCRATCHDIR/run" "$SCRATCHDIR/common" || exit 2
 cp -r "$PBS_O_WORKDIR"/*.jl "$PBS_O_WORKDIR"/Project.toml "$PBS_O_WORKDIR"/Manifest.toml \
       "$SCRATCHDIR/run"/ || { echo "ERROR: could not copy the code to scratch" >&2; exit 2; }
-cp -r "$PBS_O_WORKDIR"/../common/*.jl \
+cp -r "$PBS_O_WORKDIR"/../common/Project.toml "$PBS_O_WORKDIR"/../common/src \
       "$SCRATCHDIR/common"/ || { echo "ERROR: could not copy common/ to scratch" >&2; exit 2; }
 cd "$SCRATCHDIR/run" || exit 2
 

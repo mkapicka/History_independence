@@ -141,6 +141,9 @@ labor_grid_size=31, mu1=0, mu2=0.6, alpha=0`.
    This is pre-existing shared code and was NOT modified. Swapping
    `build_markov_shock`'s initial-probability call to `QuantEcon.std_norm_cdf`
    would close it, at the cost of touching `hd`, `hdinf` and `hiinf` together.
+   Resolved 2026-09-19: the shared `normal_cdf` is now `QuantEcon.std_norm_cdf`
+   for every solver (`common/src/shocks.jl`), and the hd and hi families agree
+   to machine precision at `mu1 = mu2 = 0`.
 2. **`save_hd_result` in `hdinf` references `p.J`**, which `HDParams` does not
    define in an infinite horizon, so the call throws a `FieldError` before
    writing anything. Fixed in this directory's copy (`maxAge` replaces it); the

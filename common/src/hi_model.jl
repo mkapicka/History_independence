@@ -18,7 +18,8 @@
 # Marek Kapicka, 2026
 # =============================================================================
 
-# ---- finalize_welfare, precompute_income_bases: all four hi directories.
+# ---- finalize_welfare: all eight directories. precompute_income_bases: the
+# four hi directories (the hd family's version uses the pow exponent).
 
 function finalize_welfare(value_function_by_kappa::Vector{Float64},
                           simulation_by_kappa::Vector{Float64},
@@ -37,6 +38,7 @@ function finalize_welfare(value_function_by_kappa::Vector{Float64},
         overallValueFunction = overall_value_function,
         overallSimulation = overall_simulation,
         overallDifference = overall_difference,
+        maxAbsDifferenceByKappa = maximum(abs.(difference_by_kappa)),
     )
 end
 

@@ -1,30 +1,17 @@
 # =============================================================================
-# common/grids.jl
+# grids.jl
 #
-# Grid construction and small numeric helpers, shared by ALL FOUR solvers in
-# this directory: hi, hiinf, hd and hdinf. Everything here was byte-identical in
-# all four before extraction, so pooling it changes nothing and is verified to
-# reproduce every solver bit-for-bit.
+# Asset-grid construction and small numeric helpers, shared by all eight
+# solvers: the asset grids, the probability checks, the interpolated weighted
+# quantile and a discounted sum. Nothing here takes a parameter struct.
 #
-# WHY THIS FILE EXISTS. The four solvers were written self-contained, each with
-# its own copy of these helpers, so the codebases could evolve independently.
-# That worked, but copies do not stay in sync on their own: four bugs fixed in
-# hiinf (the settled-age break truncating the age profiles, the cross-kappa
-# staircase read by the government budget, the settled-age weighting of the
-# statistics, and PV sums running over the zero tail) were still sitting in
-# hdinf afterwards, because there was nothing to fix once.
-#
-# WHAT DOES NOT BELONG HERE. Only code with no model semantics and no
-# HDParams/HIParams argument. The solvers themselves stay separate; that
-# separation is deliberate and was never the cause of the drift. Helpers that
-# had already diverged between the hi and hd families stay local to each -- see
-# common/shocks.jl for the rest. `build_labor_grid` in particular
-# takes a different number of arguments in the two families, so pooling it
-# would be a behaviour change rather than a refactor.
-#
-# INCLUDED, NOT IMPORTED. Each solver `include`s this inside its own module, so
-# the methods land in that module's scope exactly as when they were written out
-# inline. No package, no LOAD_PATH entry, no Project.toml change.
+# WHY THIS FILE EXISTS. The solvers were written self-contained, each with its
+# own copy of these helpers, so the codebases could evolve independently. That
+# worked, but copies do not stay in sync on their own: four bugs fixed in hiinf
+# (the settled-age break truncating the age profiles, the cross-kappa staircase
+# read by the government budget, the settled-age weighting of the statistics,
+# and PV sums running over the zero tail) were still sitting in hdinf
+# afterwards, because there was nothing to fix once.
 # =============================================================================
 
 function validate_transition(P::Matrix{Float64}, n::Int)
@@ -45,7 +32,7 @@ function normalize_probabilities(p::Vector{Float64}, name::String)
 end
 
 # -----------------------------------------------------------------------------
-# Asset and labor grids (replicated infrastructure)
+# Asset grids
 # -----------------------------------------------------------------------------
 function asset_grid_with_zero(amin::Float64, amax::Float64, nA::Int;
                               method::Symbol = :nonuniform,

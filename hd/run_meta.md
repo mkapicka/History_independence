@@ -4,11 +4,13 @@ https://www.metacentrum.cz/cs/Sluzby/
 
   cd ~/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley
   rsync -av --exclude 'results' --exclude 'figures' --exclude '.DS_Store' hd/ meta:~/hd/
+  rsync -av --exclude '.DS_Store' common/ meta:~/common/     # the shared package; ~/hd/Manifest.toml points at ../common
 
 or
 
   cd ~/Library/CloudStorage/Dropbox/Projects/HSV_HistoryDep_LifeCycle/code/julia/Bewley
   rsync -av --exclude 'results' --exclude 'figures' --exclude '.DS_Store' hdinf/ meta:~/hdinf/
+  rsync -av --exclude '.DS_Store' common/ meta:~/common/
 
 
   # 1. Log in
