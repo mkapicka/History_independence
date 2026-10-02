@@ -73,7 +73,14 @@ MU2_MAX=0.98
 # paper/notes/DOT_AccessChainAnnualization.tex). They are passed EXPLICITLY
 # rather than left to HD_SETTINGS so the submitted job records the chain it
 # ran; pSS=1 pHH=0 reproduces the hd sweep with no hand-to-mouth agents.
-MODEL_ARGS=(J=79 pSS=0.8882970895 pHH=0.7589294614 mu1=0 alpha=0 nZ=15 nEps=11 nKappa=5 tau=0.181 nS1=1 nS2=151  nA=151 labor_grid_size=151 s_grid_method=:quantile collect_distributions=false qSav=0.983574309039048 qBorr=0.983574309039048 qGov=0.983574309039048 bbar=-0.17378794875598913 beta=0.983385123227395 aMax=50.0 age0_real=20 stats_age_lo=3 stats_age_hi=39 lambdaMin=1e-5)
+# THE STATS WINDOW IS 3-40, NOT 3-39. Real age = age0_real + model age - 1, so
+# with age0_real=20 that is real 22-59, which is the window the calibration
+# targeted. stats_age_hi=39 was correct in hdinf/sweep.sh and hdinf_htm/sweep.sh
+# only because those ALSO pass age0_real=21 with stats_age_lo=2; copied here,
+# where age0_real stays 20, it reported 22-58 and lost a year. At J=79 model age
+# 40 is interior, so unlike the J=39 settings case the window does not reach the
+# terminal age.
+MODEL_ARGS=(J=79 pSS=0.8882970895 pHH=0.7589294614 mu1=0 alpha=0 nZ=15 nEps=11 nKappa=5 tau=0.181 nS1=1 nS2=151  nA=151 labor_grid_size=151 s_grid_method=:quantile collect_distributions=false qSav=0.983574309039048 qBorr=0.983574309039048 qGov=0.983574309039048 bbar=-0.17378794875598913 beta=0.983385123227395 aMax=50.0 age0_real=20 stats_age_lo=3 stats_age_hi=40 lambdaMin=1e-5)
 
 # nS1=1 because mu1=0 collapses the s1 grid to the single point [0.0] regardless
 # of nS1 -- carrying 7 would multiply the state space sevenfold for nothing.
