@@ -8,7 +8,7 @@
 # the published NamedTuple is BewleyCommon's core_statistics; only the fields
 # this variant adds are merged on here.
 #
-# Split out of the solver so solve_history_independent_tax.jl is the solver and nothing else.
+# Split out of the solver so solve.jl is the solver and nothing else.
 # Included by it, after `using` and params.jl.
 #
 # Marek Kapicka, 2026

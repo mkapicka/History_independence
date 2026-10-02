@@ -39,10 +39,10 @@ Anchor: `const HD_SETTINGS = (;`
 
 ```
 # Settings for the history-dependent tax model. This file is loaded INSIDE the
-# HistoryDependentTax module by solve_history_dependent_tax.jl and is fully
+# HistoryDependentTax module by solve.jl and is fully
 # standalone: it does not reference the history-independent SETTINGS. Edit the
 # values here to change the model, grids, or solver; after editing, re-include
-# solve_history_dependent_tax.jl (the module is replaced, with a harmless
+# solve.jl (the module is replaced, with a harmless
 # warning).
 #
 # HD_SETTINGS is the SINGLE source of truth: the HDParams constructor has no
@@ -247,24 +247,24 @@ Anchor: `ylo, yhi = ylim()`
     # rather than through it.
 ```
 
-## `hd_htm/run_history_dependent_tax.jl:114`
+## `hd_htm/main.jl:114`
 
 Anchor: `if abspath(PROGRAM_FILE) == abspath(@__FILE__)`
 
 ```
 # Script entry point. Every keyword the REPL call accepts works here too:
-#   julia -t 8 run_history_dependent_tax.jl mu1=0 mu2=0.8343 alpha=0 nS2=101 \
+#   julia -t 8 main.jl mu1=0 mu2=0.8343 alpha=0 nS2=101 \
 #         s_grid_method=:quantile labor_grid_size=151
 # The result is saved to results/ under a name built from the dimensions.
 ```
 
-## `hd_htm/solve_history_dependent_tax.jl:1`
+## `hd_htm/solve.jl:1`
 
 Anchor: `module HistoryDependentTax`
 
 ```
 # =============================================================================
-# solve_history_dependent_tax.jl  --  STANDALONE
+# solve.jl  --  STANDALONE
 #
 # Finite-horizon Bewley economy with a HISTORY-DEPENDENT tax system
 # (Section 1 of Bewley.tex). Budget constraint:
@@ -297,14 +297,14 @@ Anchor: `module HistoryDependentTax`
 # Only the HD-specific API is exported:
 #
 #   HDParams, HD_SETTINGS, make_history_dependent_params,
-#   solve_history_dependent_tax, print_hd_equilibrium_summary,
+#   solve_hd, print_hd_equilibrium_summary,
 #   check_history_independent_limit
 #
 # Usage:
-#   include("solve_history_dependent_tax.jl")   # also loads the HD settings file
+#   include("solve.jl")   # also loads the HD settings file
 #   using .HistoryDependentTax
 #   p  = make_history_dependent_params()        # HD_SETTINGS + overrides
-#   eq = solve_history_dependent_tax(p)
+#   eq = solve_hd(p)
 #
 # Solution method: hours affect s' and are therefore intertemporal, so (a', h)
 # are chosen JOINTLY on grids against a continuation value BILINEARLY
@@ -316,7 +316,7 @@ Anchor: `module HistoryDependentTax`
 # =============================================================================
 ```
 
-## `hd_htm/solve_history_dependent_tax.jl:152`
+## `hd_htm/solve.jl:152`
 
 Anchor: `a0::Float64`
 
@@ -328,7 +328,7 @@ Anchor: `a0::Float64`
     # lottery used for a', not snapped to the nearest node.
 ```
 
-## `hd_htm/solve_history_dependent_tax.jl:355`
+## `hd_htm/solve.jl:355`
 
 Anchor: `M = [alpha * mu1^s + (1.0 - alpha) * mu2^s for s in 0:J]`
 
@@ -354,7 +354,7 @@ Anchor: `M = [alpha * mu1^s + (1.0 - alpha) * mu2^s for s in 0:J]`
     # mu2 = 0 limit still gives theta0 = 1 exactly.
 ```
 
-## `hd_htm/solve_history_dependent_tax.jl:620`
+## `hd_htm/solve.jl:620`
 
 Anchor: `function F_stock(x::Float64)`
 
@@ -376,7 +376,7 @@ Anchor: `function F_stock(x::Float64)`
     # increasing on the support, so distinct levels give distinct nodes at any n.
 ```
 
-## `hd_htm/solve_history_dependent_tax.jl:645`
+## `hd_htm/solve.jl:645`
 
 Anchor: `w = S_GRID_UNIFORM_BLEND`
 
@@ -392,7 +392,7 @@ Anchor: `w = S_GRID_UNIFORM_BLEND`
     # concentration. See the tuning table at S_GRID_UNIFORM_BLEND.
 ```
 
-## `hd_htm/solve_history_dependent_tax.jl:793`
+## `hd_htm/solve.jl:793`
 
 Anchor: `median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_mass, 0.5`
 
@@ -408,7 +408,7 @@ Anchor: `median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_ma
     # were written; this brings the finite pair into line.
 ```
 
-## `hd_htm/solve_history_dependent_tax.jl:1316`
+## `hd_htm/solve.jl:1316`
 
 Anchor: `@inbounds for i in eachindex(EVzS)`
 

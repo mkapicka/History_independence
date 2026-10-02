@@ -44,9 +44,9 @@ bilinear in `(s1', s2')` as for the saver, and linear in `a'` as well, because
 
 ## Running it
 
-    julia --project=. run_history_dependent_tax.jl
-    julia --project=. -e 'include("run_history_dependent_tax.jl");
-                          run_history_dependent_tax(mu1=0.0, mu2=0.6, alpha=0.0)'
+    julia --project=. main.jl
+    julia --project=. -e 'include("main.jl");
+                          main_hd(mu1=0.0, mu2=0.6, alpha=0.0)'
 
 `SETTINGS` default to `pSS = 0.8882970895, pHH = 0.7589294614`, calibrated to
 Kaplan, Violante and Weidner (2014) Table 4 and matching `hiinf_htm`: `piH =
@@ -64,10 +64,10 @@ The `sweep_mu2` runs in `hdinf/results` already do this.
 
 | file | changed lines |
 |------|---------------|
-| `solve_history_dependent_tax.jl` | ~330 |
+| `solve.jl` | ~330 |
 | `model_settings.jl` | 18 |
-| `run_history_dependent_tax.jl` | 12 |
-| `plot_history_dependent_tax.jl` | 0 |
+| `main.jl` | 12 |
+| `plot.jl` | 0 |
 
 The saver's `solve_block!` and `evaluate_block!` are untouched; they receive
 `EVmixS` in place of `EVz`.

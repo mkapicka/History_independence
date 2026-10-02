@@ -44,7 +44,7 @@ using JLD2, Printf
 # `join_results.jl` then reads that directory.
 # =============================================================================
 
-include(joinpath(@__DIR__, "run_history_dependent_tax.jl"))
+include(joinpath(@__DIR__, "main.jl"))
 # `government_residual_at_lambda` is internal to the solver module and not
 # exported, so it is reached by qualified name. That is deliberate on the
 # solver's side: this script is the only caller that wants an equilibrium at a

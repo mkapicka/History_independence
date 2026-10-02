@@ -41,9 +41,9 @@ ordinary ages and once for the last.
 
 ## Running it
 
-    julia --project=. run_history_independent_tax.jl
-    julia --project=. -e 'include("run_history_independent_tax.jl");
-                          run_history_independent_tax(pSS = 1.0, pHH = 0.0)'
+    julia --project=. main.jl
+    julia --project=. -e 'include("main.jl");
+                          main_hi(pSS = 1.0, pHH = 0.0)'
 
 `SETTINGS` default to `pSS = 0.8882970895, pHH = 0.7589294614`, calibrated to
 Kaplan, Violante and Weidner (2014) Table 4 and matching `hiinf_htm` and
@@ -129,7 +129,7 @@ restriction.
    no `warn_if_htm_rollover_clipped` here; judge it from
    `statistics.shareAtAssetUpperBound`.
 3. **Not ported:** the three calibration drivers in `hi`
-   (`calibrate_history_independent_tax.jl` and friends). They go through
+   (`calibrate_twoprice.jl` and friends). They go through
    `make_history_independent_params` and read `eq.statistics`, so `pSS`/`pHH`
    flow through `base_kwargs` untouched; only the transcript filename would
    need them, exactly as in `hiinf_htm`.

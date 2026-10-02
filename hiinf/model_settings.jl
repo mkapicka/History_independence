@@ -15,7 +15,7 @@ const SETTINGS = (;
     # ---------------------------------------------------------------------
     # INFINITE HORIZON: no J. The agent's problem is stationary, so V and the
     # policies carry no age index. What remain are solver controls; see the
-    # header of solve_history_independent_tax.jl.
+    # header of solve.jl.
     maxAge = 600,
     tolV = 1e-8,
     maxIterV = 2000,

@@ -5,13 +5,13 @@ rewritten in the terse Discrete_HA register. Each entry records a number that
 settled a choice and is not recoverable from the code itself. Line numbers are
 from the pre-rewrite files and will drift; the anchor line identifies the site.
 
-## `hi/calibrate_history_independent_tax.jl:1`
+## `hi/calibrate_twoprice.jl:1`
 
 Anchor: `using Dates`
 
 ```
 # =============================================================================
-# calibrate_history_independent_tax.jl
+# calibrate_twoprice.jl
 #
 # Calibrate the three financial / borrowing-limit parameters
 #
@@ -20,7 +20,7 @@ Anchor: `using Dates`
 #     bbar   (borrowing-limit scale, bbar <= 0)
 #
 # so that the stationary cross-section produced by
-# `solve_history_independent_tax` matches three data moments:
+# `solve_hi` matches three data moments:
 #
 #     (i)   mean assets / mean labor income             = 0.588
 #           (or median / mean labor income = 0.0498 when asset_moment = :median)
@@ -74,7 +74,7 @@ Anchor: `using Dates`
 # =============================================================================
 ```
 
-## `hi/calibrate_history_independent_tax.jl:110`
+## `hi/calibrate_twoprice.jl:110`
 
 Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498  # (i), asset_moment = :`
 
@@ -147,7 +147,7 @@ Anchor: `mpc_shock = 0.0063278,`
     # prints each as a ratio to the realized mean so drift is visible.
 ```
 
-## `hi/solve_history_independent_tax.jl:51`
+## `hi/solve.jl:51`
 
 Anchor: `mpc_shock::Float64`
 
@@ -170,7 +170,7 @@ Anchor: `mpc_shock::Float64`
     # mean labor income rather than leaving them.
 ```
 
-## `hi/solve_history_independent_tax.jl:79`
+## `hi/solve.jl:79`
 
 Anchor: `age0_real::Int`
 
@@ -188,7 +188,7 @@ Anchor: `age0_real::Int`
     # version, so the effect of restricting it is visible rather than implied.
 ```
 
-## `hi/solve_history_independent_tax.jl:94`
+## `hi/solve.jl:94`
 
 Anchor: `a0::Float64`
 
@@ -203,7 +203,7 @@ Anchor: `a0::Float64`
     # a', not snapped to the nearest node, so it stays exact between points.
 ```
 
-## `hi/solve_history_independent_tax.jl:230`
+## `hi/solve.jl:230`
 
 Anchor: `if p.a0 == 0.0 && !p.a0_scales_with_kappa`
 
@@ -213,7 +213,7 @@ Anchor: `if p.a0 == 0.0 && !p.a0_scales_with_kappa`
     # it lies inside the grid and is feasible for every type.
 ```
 
-## `hi/solve_history_independent_tax.jl:298`
+## `hi/solve.jl:298`
 
 Anchor: `sum_mpc_positive::Float64 = 0.0`
 
@@ -224,7 +224,7 @@ Anchor: `sum_mpc_positive::Float64 = 0.0`
     # the MPC of the low-liquid-wealth group (`mpc_htm_a_lt_1000`).
 ```
 
-## `hi/solve_history_independent_tax.jl:602`
+## `hi/solve.jl:602`
 
 Anchor: `if hasproperty(s, :meanMPC)`
 
@@ -236,7 +236,7 @@ Anchor: `if hasproperty(s, :meanMPC)`
     # buys a smaller MPC.
 ```
 
-## `hi/solve_history_independent_tax.jl:1120`
+## `hi/solve.jl:1120`
 
 Anchor: `@inline function interpolate_consumption(con::AbstractVector{Float64},`
 
@@ -294,7 +294,7 @@ Anchor: `@inline function interpolate_consumption(con::AbstractVector{Float64},`
 # method produced the number.
 ```
 
-## `hi/solve_history_independent_tax.jl:1506`
+## `hi/solve.jl:1506`
 
 Anchor: `median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_mass, 0.5`
 
@@ -310,7 +310,7 @@ Anchor: `median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_ma
     # were written; this brings the finite pair into line.
 ```
 
-## `hi/solve_history_independent_tax.jl:1992`
+## `hi/solve.jl:1992`
 
 Anchor: `if isfinite(residuals[i]) && isfinite(residuals[i + 1]) &&`
 

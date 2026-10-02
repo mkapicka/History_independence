@@ -31,10 +31,10 @@ Anchor: `const HD_SETTINGS = (;`
 
 ```
 # Settings for the history-dependent tax model. This file is loaded INSIDE the
-# HistoryDependentTax module by solve_history_dependent_tax.jl and is fully
+# HistoryDependentTax module by solve.jl and is fully
 # standalone: it does not reference the history-independent SETTINGS. Edit the
 # values here to change the model, grids, or solver; after editing, re-include
-# solve_history_dependent_tax.jl (the module is replaced, with a harmless
+# solve.jl (the module is replaced, with a harmless
 # warning).
 #
 # HD_SETTINGS is the SINGLE source of truth: the HDParams constructor has no
@@ -186,7 +186,7 @@ Anchor: `hMin = 0.05,`
 
 ## `hdinf/recover_ratios.jl:3`
 
-Anchor: `include(joinpath(@__DIR__, "run_history_dependent_tax.jl"))`
+Anchor: `include(joinpath(@__DIR__, "main.jl"))`
 
 ```
 # =============================================================================
@@ -236,24 +236,24 @@ Anchor: `const LEVEL_TOL = 1e-8`
 # different equilibrium cannot slip through.
 ```
 
-## `hdinf/run_history_dependent_tax.jl:111`
+## `hdinf/main.jl:111`
 
 Anchor: `if abspath(PROGRAM_FILE) == abspath(@__FILE__)`
 
 ```
 # Script entry point. Every keyword the REPL call accepts works here too:
-#   julia -t 8 run_history_dependent_tax.jl mu1=0 mu2=0.8343 alpha=0 nS2=101 \
+#   julia -t 8 main.jl mu1=0 mu2=0.8343 alpha=0 nS2=101 \
 #         s_grid_method=:quantile labor_grid_size=151
 # The result is saved to results/ under a name built from the dimensions.
 ```
 
-## `hdinf/solve_history_dependent_tax.jl:1`
+## `hdinf/solve.jl:1`
 
 Anchor: `module HistoryDependentTaxInfinite`
 
 ```
 # =============================================================================
-# solve_history_dependent_tax.jl  --  STANDALONE
+# solve.jl  --  STANDALONE
 #
 # Finite-horizon Bewley economy with a HISTORY-DEPENDENT tax system
 # (Section 1 of Bewley.tex). Budget constraint:
@@ -286,14 +286,14 @@ Anchor: `module HistoryDependentTaxInfinite`
 # Only the HD-specific API is exported:
 #
 #   HDParams, HD_SETTINGS, make_history_dependent_params,
-#   solve_history_dependent_tax, print_hd_equilibrium_summary,
+#   solve_hd, print_hd_equilibrium_summary,
 #   check_history_independent_limit
 #
 # Usage:
-#   include("solve_history_dependent_tax.jl")   # also loads the HD settings file
+#   include("solve.jl")   # also loads the HD settings file
 #   using .HistoryDependentTax
 #   p  = make_history_dependent_params()        # HD_SETTINGS + overrides
-#   eq = solve_history_dependent_tax(p)
+#   eq = solve_hd(p)
 #
 # Solution method: hours affect s' and are therefore intertemporal, so (a', h)
 # are chosen JOINTLY on grids against a continuation value BILINEARLY
@@ -305,7 +305,7 @@ Anchor: `module HistoryDependentTaxInfinite`
 # =============================================================================
 ```
 
-## `hdinf/solve_history_dependent_tax.jl:104`
+## `hdinf/solve.jl:104`
 
 Anchor: `age0_real::Int`
 
@@ -318,7 +318,7 @@ Anchor: `age0_real::Int`
     # the all-ages average this solver used to report as its only statistic.
 ```
 
-## `hdinf/solve_history_dependent_tax.jl:114`
+## `hdinf/solve.jl:114`
 
 Anchor: `a0::Float64`
 
@@ -331,7 +331,7 @@ Anchor: `a0::Float64`
     # snapped to the nearest node, so it stays exact between grid points.
 ```
 
-## `hdinf/solve_history_dependent_tax.jl:327`
+## `hdinf/solve.jl:327`
 
 Anchor: `denom = alpha / (1.0 - beta * mu1) + (1.0 - alpha) / (1.0 - beta * mu2)`
 
@@ -351,7 +351,7 @@ Anchor: `denom = alpha / (1.0 - beta * mu1) + (1.0 - alpha) / (1.0 - beta * mu2)
     # mu2 = 0 limit still gives theta0 = 1 exactly.
 ```
 
-## `hdinf/solve_history_dependent_tax.jl:581`
+## `hdinf/solve.jl:581`
 
 Anchor: `w = S_GRID_UNIFORM_BLEND`
 
@@ -367,7 +367,7 @@ Anchor: `w = S_GRID_UNIFORM_BLEND`
     # concentration. See the tuning table at S_GRID_UNIFORM_BLEND.
 ```
 
-## `hdinf/solve_history_dependent_tax.jl:1275`
+## `hdinf/solve.jl:1275`
 
 Anchor: `u_by_age = zeros(nAge)`
 
@@ -379,7 +379,7 @@ Anchor: `u_by_age = zeros(nAge)`
     # 1e-17 agreement this check is supposed to demonstrate.
 ```
 
-## `hdinf/solve_history_dependent_tax.jl:1377`
+## `hdinf/solve.jl:1377`
 
 Anchor: `if age > 1`
 
@@ -413,7 +413,7 @@ Anchor: `if age > 1`
         # function solve. `converged_age` is kept purely as a diagnostic.
 ```
 
-## `hdinf/solve_history_dependent_tax.jl:1539`
+## `hdinf/solve.jl:1539`
 
 Anchor: `Jc = diag.settledAge`
 

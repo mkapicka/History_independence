@@ -47,7 +47,7 @@
 using JLD2
 using Printf
 
-include("run_history_dependent_tax.jl")   # also loads the solver + HD_SETTINGS
+include("main.jl")   # also loads the solver + HD_SETTINGS
 
 """
     MU2_MIN, MU2_MAX, N_MU2
@@ -120,7 +120,7 @@ The result is
        theta0, lambda, govBudgetResidual, sClampedMassShare, converged,
        elapsedSeconds, errors, mu1, settings)
 
-Each solve is `run_history_dependent_tax(; mu1 = mu1, mu2 = mu2_grid[i],
+Each solve is `main_hd(; mu1 = mu1, mu2 = mu2_grid[i],
 labor_grid_size = labor_grid_size, lambdaMin = lambdaMin, kwargs...)`, so any
 further `kwargs` override `HD_SETTINGS` exactly as they do there. `theta0` and
 `lambda` are carried along because they are what changes across the sweep:
@@ -186,13 +186,13 @@ function sweep_mu2(mu2_grid = nothing;
             # Suppress the per-solve output unless asked, so the sweep table
             # stays legible.
             result = if full_output
-                run_history_dependent_tax(; mu1 = mu1, mu2 = mu2vec[i],
+                main_hd(; mu1 = mu1, mu2 = mu2vec[i],
                                           nS1 = nS1, nS2 = nS2,
                                           labor_grid_size = labor_grid_size,
                                           lambdaMin = lambdaMin, kwargs...)
             else
                 redirect_stdout(devnull) do
-                    run_history_dependent_tax(; mu1 = mu1, mu2 = mu2vec[i],
+                    main_hd(; mu1 = mu1, mu2 = mu2vec[i],
                                               nS1 = nS1, nS2 = nS2,
                                               labor_grid_size = labor_grid_size,
                                               lambdaMin = lambdaMin, kwargs...)

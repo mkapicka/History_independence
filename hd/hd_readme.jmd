@@ -1,5 +1,5 @@
 # 1. Setup
-Load the run file and activate the project environment. Includes flow one direction (`solve ← model_settings ← run`): the single `include` below defines the module `HistoryDependentTax`, the solver, and the settings. Plotting is a separate layer: `include("plot_history_dependent_tax.jl")` when needed. The code is fully standalone — it neither includes nor calls anything in `hi/`, and the module wrapper lets both solvers load in the same session without name collisions.
+Load the run file and activate the project environment. Includes flow one direction (`solve ← model_settings ← run`): the single `include` below defines the module `HistoryDependentTax`, the solver, and the settings. Plotting is a separate layer: `include("plot.jl")` when needed. The code is fully standalone — it neither includes nor calls anything in `hi/`, and the module wrapper lets both solvers load in the same session without name collisions.
 
 **Start Julia with as many threads as you have performance cores.** The backward induction parallelizes over the `nEps*nS1*nS2` blocks of `(eps, s1, s2)` at each `(age, z)` — 245 blocks at the default settings — so it keeps scaling well past `nKappa`. Launch with `julia --project=. -t 8`, or set `JULIA_NUM_THREADS` in your shell profile; `julia.NumThreads` is the VS Code setting. Measured on a 10-core machine (8 performance cores), one solve at `J=20, nA=51, nZ=5, nEps=5, nKappa=3, nS1=nS2=5, nH=101`:
 
@@ -10,8 +10,8 @@ Load the run file and activate the project environment. Includes flow one direct
 The forward distribution is threaded over `kappa` separately and does cap at `nKappa`, but it is the minor cost. Results are bit-for-bit independent of the thread count: blocks write disjoint slices and no reduction crosses them.
 
 ```julia
-include("run_history_dependent_tax.jl")
-result = run_history_dependent_tax()
+include("main.jl")
+result = main_hd()
 ```
 
 
@@ -43,9 +43,9 @@ Setting `mu1 = mu2 = 0` (with `nS1 = nS2 = 1`) gives `theta0 = 1`, collapses the
 Make sure you are in the current directory of the repository, or adjust the path accordingly. `kwargs` override `HD_SETTINGS` in `model_settings.jl`:
 
 ```julia
-include("run_history_dependent_tax.jl")
-result = run_history_dependent_tax()
-result = run_history_dependent_tax(nA = 41, J = 4, mu1 = 0.0)   # overrides
+include("main.jl")
+result = main_hd()
+result = main_hd(nA = 41, J = 4, mu1 = 0.0)   # overrides
 ```
 
 The main keyword arguments (defaults from `HD_SETTINGS`):
@@ -206,7 +206,7 @@ result2 = load_hd_result(path)     # (; eq, params)
 # 6. Plotting
 The plotting function takes the result of a run and saves the standard figures (asset grid, age profiles of assets/hours/consumption, unconditional distributions of assets/hours/consumption) to `figures/`:
 ```julia
-include("plot_history_dependent_tax.jl")
-plot_history_dependent_tax(result)
+include("plot.jl")
+plot_hd(result)
 ```
 The hours histogram marks `hMax` so a binding hours bound is visible. Plotting the unconditional hours and consumption distributions requires `collect_distributions = true` (the default).

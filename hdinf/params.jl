@@ -2,7 +2,7 @@
 # params.jl
 #
 # The parameter object for this directory: its declaration, its constructor and
-# its validation. Split out of the solver so that solve_history_dependent_tax.jl is the solver
+# its validation. Split out of the solver so that solve.jl is the solver
 # and nothing else -- the same separation BewleyCommon made for shared code, and
 # the one Discrete_HA draws between +setup and +solver.
 #
@@ -11,7 +11,7 @@
 # this file says what the values are called, how the grids are built from them,
 # and what combinations are refused.
 #
-# Included by solve_history_dependent_tax.jl, after its `using` block and before anything that
+# Included by solve.jl, after its `using` block and before anything that
 # needs the type. It is not a module: the definitions land in the same scope they
 # did when they lived in the solver.
 #

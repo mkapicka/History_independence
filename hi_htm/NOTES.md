@@ -5,13 +5,13 @@ rewritten in the terse Discrete_HA register. Each entry records a number that
 settled a choice and is not recoverable from the code itself. Line numbers are
 from the pre-rewrite files and will drift; the anchor line identifies the site.
 
-## `hi_htm/calibrate_history_independent_tax.jl:1`
+## `hi_htm/calibrate_twoprice.jl:1`
 
 Anchor: `using Dates`
 
 ```
 # =============================================================================
-# calibrate_history_independent_tax.jl
+# calibrate_twoprice.jl
 #
 # Calibrate the three financial / borrowing-limit parameters
 #
@@ -20,7 +20,7 @@ Anchor: `using Dates`
 #     bbar   (borrowing-limit scale, bbar <= 0)
 #
 # so that the stationary cross-section produced by
-# `solve_history_independent_tax` matches three data moments:
+# `solve_hi` matches three data moments:
 #
 #     (i)   mean assets / mean labor income             = 0.588
 #           (or median / mean labor income = 0.0498 when asset_moment = :median)
@@ -74,7 +74,7 @@ Anchor: `using Dates`
 # =============================================================================
 ```
 
-## `hi_htm/calibrate_history_independent_tax.jl:110`
+## `hi_htm/calibrate_twoprice.jl:110`
 
 Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498  # (i), asset_moment = :`
 
@@ -91,13 +91,13 @@ Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498  # (i), asset_mom
     # negative liquid balances.
 ```
 
-## `hi_htm/calibrate_history_independent_tax_beta.jl:1`
+## `hi_htm/calibrate_beta.jl:1`
 
 Anchor: `# Reuses `solve_scalar`, `moments_from` and the solver entry points from the`
 
 ```
 # =============================================================================
-# calibrate_history_independent_tax_beta.jl
+# calibrate_beta.jl
 #
 # A TWO-INSTRUMENT, TWO-TARGET calibration in which the three prices are GIVEN
 # and the discount factor does the work:
@@ -217,19 +217,19 @@ Anchor: `# Reuses `solve_scalar`, `moments_from` and the solver entry points fro
 # -----------------------------------------------------------------------------
 # USAGE
 # -----------------------------------------------------------------------------
-#   include("calibrate_history_independent_tax_beta.jl")
+#   include("calibrate_beta.jl")
 #
 #   # prices at their SETTINGS values (qSav 0.99, qBorr 0.97, qGov 0.99):
-#   r = calibrate_history_independent_tax_beta(nZ = 15, nEps = 11,
+#   r = calibrate_beta(nZ = 15, nEps = 11,
 #                                              nKappa = 5, nA = 151)
 #
 #   # one price everywhere, so the government budget telescopes exactly:
-#   r = calibrate_history_independent_tax_beta(nZ = 15, nEps = 11, nKappa = 5,
+#   r = calibrate_beta(nZ = 15, nEps = 11, nKappa = 5,
 #                                              nA = 151, qSav = 0.99,
 #                                              qBorr = 0.99, qGov = 0.99)
 #
 #   # median instead of mean, and a tighter inner solve:
-#   r = calibrate_history_independent_tax_beta(
+#   r = calibrate_beta(
 #           calib = BetaCalibration(asset_moment = :median,
 #                                   inner_xtol = 1e-7))
 #
@@ -240,7 +240,7 @@ Anchor: `# Reuses `solve_scalar`, `moments_from` and the solver entry points fro
 # =============================================================================
 ```
 
-## `hi_htm/calibrate_history_independent_tax_beta.jl:163`
+## `hi_htm/calibrate_beta.jl:163`
 
 Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498`
 
@@ -261,7 +261,7 @@ Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498`
     # boundary and it will stall against the bracket cap.
 ```
 
-## `hi_htm/calibrate_history_independent_tax_beta.jl:182`
+## `hi_htm/calibrate_beta.jl:182`
 
 Anchor: `beta_init::Float64 = 0.960`
 
@@ -352,7 +352,7 @@ Anchor: `aMax = 60.0,`
     # hi / hi_htm nesting check.
 ```
 
-## `hi_htm/solve_history_independent_tax.jl:119`
+## `hi_htm/solve.jl:119`
 
 Anchor: `age0_real::Int`
 
@@ -370,7 +370,7 @@ Anchor: `age0_real::Int`
     # version, so the effect of restricting it is visible rather than implied.
 ```
 
-## `hi_htm/solve_history_independent_tax.jl:134`
+## `hi_htm/solve.jl:134`
 
 Anchor: `a0::Float64`
 
@@ -385,7 +385,7 @@ Anchor: `a0::Float64`
     # a', not snapped to the nearest node, so it stays exact between points.
 ```
 
-## `hi_htm/solve_history_independent_tax.jl:279`
+## `hi_htm/solve.jl:279`
 
 Anchor: `if p.a0 == 0.0 && !p.a0_scales_with_kappa`
 
@@ -395,7 +395,7 @@ Anchor: `if p.a0 == 0.0 && !p.a0_scales_with_kappa`
     # it lies inside the grid and is feasible for every type.
 ```
 
-## `hi_htm/solve_history_independent_tax.jl:912`
+## `hi_htm/solve.jl:912`
 
 Anchor: `@inbounds for i in eachindex(EVS_raw)`
 
@@ -407,7 +407,7 @@ Anchor: `@inbounds for i in eachindex(EVS_raw)`
         # with -Inf the pSS = 1 corner would be NaN.
 ```
 
-## `hi_htm/solve_history_independent_tax.jl:1605`
+## `hi_htm/solve.jl:1605`
 
 Anchor: `median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_mass, 0.5`
 
@@ -423,7 +423,7 @@ Anchor: `median_assets = interpolated_weighted_quantile(p.a_grid, stats.asset_ma
     # were written; this brings the finite pair into line.
 ```
 
-## `hi_htm/solve_history_independent_tax.jl:2064`
+## `hi_htm/solve.jl:2064`
 
 Anchor: `if isfinite(residuals[i]) && isfinite(residuals[i + 1]) &&`
 

@@ -89,11 +89,11 @@ function emit!(lines, prefix, x)
     return lines
 end
 
-const RUNNER = startswith(DIR, "hd") ? "run_history_dependent_tax.jl" :
-                                       "run_history_independent_tax.jl"
-include(joinpath(@__DIR__, "..", DIR, RUNNER))
-const SOLVE = startswith(DIR, "hd") ? run_history_dependent_tax :
-                                      run_history_independent_tax
+# Every directory's entry point is main.jl, so there is nothing to select here.
+# The entry FUNCTION still carries a family tag, because the hd solver is a
+# module that exports its name and is meant to be loadable beside an hi one.
+include(joinpath(@__DIR__, "..", DIR, "main.jl"))
+const SOLVE = startswith(DIR, "hd") ? main_hd : main_hi
 
 # One verbose solve with stdout captured: its return value gives the values
 # and the capture gives the printed summary. The printed form is checked

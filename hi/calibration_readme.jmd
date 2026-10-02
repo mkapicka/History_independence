@@ -1,5 +1,5 @@
 # 1. Setup
-Load the calibration file and activate the project environment. Includes flow one direction (`solve ← model_settings ← run ← calibrate`), so this single `include` also defines `run_history_independent_tax` and the solver itself. Plotting is a separate layer: `include("plot_history_independent_tax.jl")` when needed.
+Load the calibration file and activate the project environment. Includes flow one direction (`solve ← model_settings ← run ← calibrate`), so this single `include` also defines `main_hi` and the solver itself. Plotting is a separate layer: `include("plot.jl")` when needed.
 
 **Start Julia with at least three threads.** The solver parallelizes over the `kappa` grid, so with the default `nKappa = 3` a single-threaded session takes about 2.6x as long (3.84s per solve against 1.46s here). Launch with `julia --project=. -t 3`, or set `JULIA_NUM_THREADS=3` in your shell profile; `julia.NumThreads` is the VS Code setting. More threads than `nKappa` buy nothing — 5 and 8 threads measure the same as 3.
 
@@ -10,8 +10,8 @@ Calibrate the model to match the three targets in `CalibrationParams` by adjusti
 Make sure you are in the current directory of the repository, or adjust the path to accordingly. The calibration file itself includes the model settings and solver, so you do not need to include those separately. 
 
 ```julia
-include("calibrate_history_independent_tax.jl")
-result = calibrate_history_independent_tax()
+include("calibrate_twoprice.jl")
+result = calibrate_twoprice()
 ``` 
 
 The calibration function takes the following main keyword arguments:
@@ -34,7 +34,7 @@ passed as the `calib` keyword — not as bare keywords (passing e.g.
 the model constructor):
 
 ```julia
-result = calibrate_history_independent_tax(
+result = calibrate_twoprice(
     calib = CalibrationParams(asset_moment = :median, moment_tol = 1e-4))
 ```
 
@@ -230,11 +230,11 @@ Defaults in parentheses are the values in `SETTINGS` (`model_settings.jl`), whic
 
 
 # 4. Computing the equilibrium
-The calibrated instruments `qSav`, `qBorr`, and `bbar` can be used to compute the equilibrium of the model. The equilibrium is computed by calling `run_history_independent_tax` with the calibrated parameters. The function returns a `NamedTuple` containing the equilibrium results, including the government budget residual, aggregate consumption, hours, labor income, assets by age, and other statistics.
+The calibrated instruments `qSav`, `qBorr`, and `bbar` can be used to compute the equilibrium of the model. The equilibrium is computed by calling `main_hi` with the calibrated parameters. The function returns a `NamedTuple` containing the equilibrium results, including the government budget residual, aggregate consumption, hours, labor income, assets by age, and other statistics.
 
 ```julia
-include("run_history_independent_tax.jl")
-result_run = run_history_independent_tax()
+include("main.jl")
+result_run = main_hi()
 ```
 
 The function takes the following keyword arguments:
@@ -244,7 +244,7 @@ The function takes the following keyword arguments:
 - other parameters that modify the baseline values in the `result_calib.params` struct.
 
 ## Result structure
-`result` is a `NamedTuple`, a subset of result from `solve_history_independent_tax`; top fields are documented below.
+`result` is a `NamedTuple`, a subset of result from `solve_hi`; top fields are documented below.
 
 ### `result` — top level
 | Field            | Type                 | Meaning                                                   |
@@ -254,8 +254,8 @@ The function takes the following keyword arguments:
 
 
 # 5. Plotting
-The plotting function `plot_history_independent_tax` takes the result of a run and produces a series of plots illustrating the equilibrium distributions, policy functions, and other relevant statistics. The function can be called as follows:
+The plotting function `plot_hi` takes the result of a run and produces a series of plots illustrating the equilibrium distributions, policy functions, and other relevant statistics. The function can be called as follows:
 ```julia
-include("plot_history_independent_tax.jl")
-plot_history_independent_tax(result_run)
+include("plot.jl")
+plot_hi(result_run)
 ```

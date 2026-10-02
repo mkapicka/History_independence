@@ -5,7 +5,7 @@
 # aggregate-statistics block, the welfare table, the upper-bound and lambda
 # warnings -- are in BewleyCommon's report.jl.
 #
-# Split out of the solver so solve_history_independent_tax.jl is the solver and nothing else.
+# Split out of the solver so solve.jl is the solver and nothing else.
 # Included by it, after `using` and params.jl.
 #
 # Marek Kapicka, 2026

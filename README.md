@@ -16,14 +16,27 @@ distinguishes them.
 
 |  | finite | infinite |
 |---|---|---|
-| history-independent | `hi` (1,128) | `hiinf` (1,262) |
-| history-independent + HtM | `hi_htm` (1,275) | `hiinf_htm` (1,609) |
-| history-dependent | `hd` (1,169) | `hdinf` (1,634) |
-| history-dependent + HtM | `hd_htm` (1,483) | `hdinf_htm` (1,963) |
+| history-independent | `hi` (670) | `hiinf` (741) |
+| history-independent + HtM | `hi_htm` (811) | `hiinf_htm` (1,039) |
+| history-dependent | `hd` (635) | `hdinf` (1,076) |
+| history-dependent + HtM | `hd_htm` (900) | `hdinf_htm` (1,370) |
 
-Line counts are the solver file only. Each directory also holds its own
-`model_settings.jl`, `Project.toml`/`Manifest.toml`, `NOTES.md`, and its runner,
-calibration and plotting scripts.
+Line counts are `solve.jl` only. Every directory holds the same seven files,
+plus one `calibrate_*.jl` per calibration exercise:
+
+| file | role |
+|---|---|
+| `model_settings.jl` | the values, and the only place they are set |
+| `params.jl` | the parameter object: declaration, constructor, validation |
+| `solve.jl` | the model: `solve_hi(p)` / `solve_hd(p)` -> equilibrium |
+| `statistics.jl` | the accumulator and the per-cell update |
+| `report.jl` | this variant's own printers |
+| `main.jl` | **entry point**: settings -> solve -> print -> save |
+| `plot.jl` | figures from a result: `plot_hi(r)` / `plot_hd(r)` |
+| `calibrate_*.jl` | the other way of using the solver, calling `solve_hi(p)` directly |
+
+`main.jl` is where to start; `solve.jl` is a pure function of a parameter object
+and is what the calibration drivers call directly, 19 times across the hi family.
 
 ## The other directories
 
@@ -45,9 +58,9 @@ them to a format 1.12.6 cannot use.
 julia +1.12.6 --project=hi -t 4
 ```
 ```julia
-include("hi/run_history_independent_tax.jl")
-r = run_history_independent_tax()                      # settings defaults
-r = run_history_independent_tax(; nA = 151, nZ = 15)   # overrides
+include("hi/main.jl")
+r = main_hi()                      # settings defaults
+r = main_hi(; nA = 151, nZ = 15)   # overrides
 r.eq.statistics.meanAssetsToMeanLaborIncome
 ```
 
@@ -60,12 +73,24 @@ cross-section, and the welfare decomposition.
 
 ### Calibrating
 
+Each file is named for the instruments it moves, not for the model:
+
+| file | instruments | targets |
+|---|---|---|
+| `calibrate_twoprice.jl` | `qSav`, `qBorr`, `bbar` | assets, borrowing limit, share with negative assets |
+| `calibrate_oneprice.jl` | `q = qSav = qBorr = qGov`, `bbar` | assets, borrowing limit (`hiinf` only) |
+| `calibrate_beta.jl` | `beta`, `bbar`, prices GIVEN | assets, borrowing limit |
+
 ```julia
-include("hi/calibrate_history_independent_tax.jl")        # three instruments: qSav, qBorr, bbar
-include("hi/calibrate_history_independent_tax_beta.jl")   # prices given, beta and bbar do the work
+include("hi/calibrate_beta.jl")      # also pulls in calibrate_twoprice.jl for its helpers
+r = calibrate_beta()
+r.beta, r.bbar
 ```
 
-Both write a timestamped transcript to `<dir>/calibration_results/`.
+Each writes a timestamped transcript to `<dir>/calibration_results/`. The
+calibrated values print with every digit, so they can be pasted into
+`model_settings.jl` without loss -- they were truncated at `%.8f`/`%.10f` until
+2026-10-01, so a value copied from an older transcript is already rounded.
 
 ## Testing
 

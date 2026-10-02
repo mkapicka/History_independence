@@ -5,13 +5,13 @@ rewritten in the terse Discrete_HA register. Each entry records a number that
 settled a choice and is not recoverable from the code itself. Line numbers are
 from the pre-rewrite files and will drift; the anchor line identifies the site.
 
-## `hiinf/calibrate_history_independent_tax.jl:1`
+## `hiinf/calibrate_twoprice.jl:1`
 
 Anchor: `using Dates`
 
 ```
 # =============================================================================
-# calibrate_history_independent_tax.jl
+# calibrate_twoprice.jl
 #
 # Calibrate the three financial / borrowing-limit parameters
 #
@@ -20,7 +20,7 @@ Anchor: `using Dates`
 #     bbar   (borrowing-limit scale, bbar <= 0)
 #
 # so that the stationary cross-section produced by
-# `solve_history_independent_tax` matches three data moments:
+# `solve_hi` matches three data moments:
 #
 #     (i)   mean assets / mean labor income             = 0.588
 #           (or median / mean labor income = 0.0498 when asset_moment = :median)
@@ -74,7 +74,7 @@ Anchor: `using Dates`
 # =============================================================================
 ```
 
-## `hiinf/calibrate_history_independent_tax.jl:110`
+## `hiinf/calibrate_twoprice.jl:110`
 
 Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498  # (i), asset_moment = :`
 
@@ -91,7 +91,7 @@ Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498  # (i), asset_mom
     # negative liquid balances.
 ```
 
-## `hiinf/calibrate_history_independent_tax.jl:126`
+## `hiinf/calibrate_twoprice.jl:126`
 
 Anchor: `qSav_init::Float64  = 0.980681209802701`
 
@@ -102,7 +102,7 @@ Anchor: `qSav_init::Float64  = 0.980681209802701`
     # calibrated instruments. Overriding them here changes the starting point
     # without touching model_settings.jl:
     #
-    #   calibrate_history_independent_tax(calib = CalibrationParams(bbar_init = -0.17707415))
+    #   calibrate_twoprice(calib = CalibrationParams(bbar_init = -0.17707415))
     #
     # bbar_init is the one worth setting deliberately. Block (ii) is EXACTLY
     # linear in bbar -- the true limit is -bbar * E[exp(kappa + rho*z)] and bbar
@@ -119,13 +119,13 @@ Anchor: `qSav_init::Float64  = 0.980681209802701`
     # somewhat above this -- still a far better start than 0.99.
 ```
 
-## `hiinf/calibrate_history_independent_tax_beta.jl:1`
+## `hiinf/calibrate_beta.jl:1`
 
 Anchor: `# Reuses `solve_scalar`, `moments_from` and the solver entry points from the`
 
 ```
 # =============================================================================
-# calibrate_history_independent_tax_beta.jl
+# calibrate_beta.jl
 #
 # A TWO-INSTRUMENT, TWO-TARGET calibration in which the three prices are GIVEN
 # and the discount factor does the work:
@@ -223,19 +223,19 @@ Anchor: `# Reuses `solve_scalar`, `moments_from` and the solver entry points fro
 # -----------------------------------------------------------------------------
 # USAGE
 # -----------------------------------------------------------------------------
-#   include("calibrate_history_independent_tax_beta.jl")
+#   include("calibrate_beta.jl")
 #
 #   # prices at their SETTINGS values (qSav 0.99, qBorr 0.97, qGov 0.99):
-#   r = calibrate_history_independent_tax_beta(nZ = 15, nEps = 11,
+#   r = calibrate_beta(nZ = 15, nEps = 11,
 #                                              nKappa = 5, nA = 151)
 #
 #   # one price everywhere, so the government budget telescopes exactly:
-#   r = calibrate_history_independent_tax_beta(nZ = 15, nEps = 11, nKappa = 5,
+#   r = calibrate_beta(nZ = 15, nEps = 11, nKappa = 5,
 #                                              nA = 151, qSav = 0.99,
 #                                              qBorr = 0.99, qGov = 0.99)
 #
 #   # median instead of mean, and a tighter inner solve:
-#   r = calibrate_history_independent_tax_beta(
+#   r = calibrate_beta(
 #           calib = BetaCalibration(asset_moment = :median,
 #                                   inner_xtol = 1e-7))
 #
@@ -246,7 +246,7 @@ Anchor: `# Reuses `solve_scalar`, `moments_from` and the solver entry points fro
 # =============================================================================
 ```
 
-## `hiinf/calibrate_history_independent_tax_beta.jl:141`
+## `hiinf/calibrate_beta.jl:141`
 
 Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498`
 
@@ -267,7 +267,7 @@ Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498`
     # boundary and it will stall against the bracket cap.
 ```
 
-## `hiinf/calibrate_history_independent_tax_beta.jl:160`
+## `hiinf/calibrate_beta.jl:160`
 
 Anchor: `beta_init::Float64 = 0.960`
 
@@ -279,7 +279,7 @@ Anchor: `beta_init::Float64 = 0.960`
     # SETTINGS value, which is the natural neutral start.
 ```
 
-## `hiinf/calibrate_history_independent_tax_beta.jl:168`
+## `hiinf/calibrate_beta.jl:168`
 
 Anchor: `beta_min::Float64 = 0.900`
 
@@ -291,13 +291,13 @@ Anchor: `beta_min::Float64 = 0.900`
     # beta_max and says so rather than being capped silently.
 ```
 
-## `hiinf/calibrate_history_independent_tax_oneprice.jl:1`
+## `hiinf/calibrate_oneprice.jl:1`
 
 Anchor: `# Reuses `solve_scalar`, `moments_from` and the solver entry points from the`
 
 ```
 # =============================================================================
-# calibrate_history_independent_tax_oneprice.jl
+# calibrate_oneprice.jl
 #
 # A TWO-INSTRUMENT, TWO-TARGET calibration in which households face a single
 # intertemporal price:
@@ -374,13 +374,13 @@ Anchor: `# Reuses `solve_scalar`, `moments_from` and the solver entry points fro
 # -----------------------------------------------------------------------------
 # USAGE
 # -----------------------------------------------------------------------------
-#   include("calibrate_history_independent_tax_oneprice.jl")
-#   r = calibrate_history_independent_tax_oneprice(nZ = 15, nEps = 11,
+#   include("calibrate_oneprice.jl")
+#   r = calibrate_oneprice(nZ = 15, nEps = 11,
 #                                                  nKappa = 5, nA = 151)
 #   r.q, r.bbar, r.moments.shareNegativeLiquidAssets
 #
 #   # median instead of mean, and a tighter inner solve:
-#   r = calibrate_history_independent_tax_oneprice(
+#   r = calibrate_oneprice(
 #           calib = OnePriceCalibration(asset_moment = :median,
 #                                       inner_xtol = 1e-7))
 #
@@ -389,7 +389,7 @@ Anchor: `# Reuses `solve_scalar`, `moments_from` and the solver entry points fro
 # =============================================================================
 ```
 
-## `hiinf/calibrate_history_independent_tax_oneprice.jl:111`
+## `hiinf/calibrate_oneprice.jl:111`
 
 Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498`
 
@@ -402,7 +402,7 @@ Anchor: `medianAssetsToMeanLaborIncome::Float64       = 0.0498`
     # of the 2,629; they were brought into line on 2026-09-23.
 ```
 
-## `hiinf/calibrate_history_independent_tax_oneprice.jl:122`
+## `hiinf/calibrate_oneprice.jl:122`
 
 Anchor: `q_init::Float64    = 0.985`
 
@@ -413,7 +413,7 @@ Anchor: `q_init::Float64    = 0.985`
     # from 0.180 to 0.185; at 0.180 it read -0.17228836).
 ```
 
-## `hiinf/calibrate_history_independent_tax_oneprice.jl:129`
+## `hiinf/calibrate_oneprice.jl:129`
 
 Anchor: `q_min::Float64    = 0.950`
 
@@ -484,7 +484,7 @@ Anchor: `age0_real = 20,`
     # by borrowing_limit_mass and so still cover j = 0,...,J-1 only.
 ```
 
-## `hiinf/solve_history_independent_tax.jl:92`
+## `hiinf/solve.jl:92`
 
 Anchor: `tolDriftRel::Float64             # warn when drift/|Y[end]| exceeds this`
 
@@ -499,7 +499,7 @@ Anchor: `tolDriftRel::Float64             # warn when drift/|Y[end]| exceeds thi
     # to silence the warning entirely; tolDist still drives convergedAge.
 ```
 
-## `hiinf/solve_history_independent_tax.jl:101`
+## `hiinf/solve.jl:101`
 
 Anchor: `a0::Float64                      # initial assets (level, or scale if below)`
 
@@ -515,7 +515,7 @@ Anchor: `a0::Float64                      # initial assets (level, or scale if b
     # between grid points.
 ```
 
-## `hiinf/solve_history_independent_tax.jl:112`
+## `hiinf/solve.jl:112`
 
 Anchor: `age0_real::Int                   # real age at model age 1 (birth)`
 
@@ -535,7 +535,7 @@ Anchor: `age0_real::Int                   # real age at model age 1 (birth)`
     # data moment excludes.
 ```
 
-## `hiinf/solve_history_independent_tax.jl:267`
+## `hiinf/solve.jl:267`
 
 Anchor: `if p.a0 == 0.0 && !p.a0_scales_with_kappa`
 
@@ -545,7 +545,7 @@ Anchor: `if p.a0 == 0.0 && !p.a0_scales_with_kappa`
     # the initial holding lies inside the grid and is feasible for every type.
 ```
 
-## `hiinf/solve_history_independent_tax.jl:556`
+## `hiinf/solve.jl:556`
 
 Anchor: `@printf("settled assets             = %.8f\n", eq.A[end])`
 
@@ -555,7 +555,7 @@ Anchor: `@printf("settled assets             = %.8f\n", eq.A[end])`
     # padded this printed 0.0 -- the untouched tail of `zeros(maxAge)`.
 ```
 
-## `hiinf/solve_history_independent_tax.jl:675`
+## `hiinf/solve.jl:675`
 
 Anchor: `converged || return nothing`
 
@@ -568,7 +568,7 @@ Anchor: `converged || return nothing`
     # against an equilibrium ~1.01, warned twice for one underlying problem.
 ```
 
-## `hiinf/solve_history_independent_tax.jl:1239`
+## `hiinf/solve.jl:1239`
 
 Anchor: `u_by_age = zeros(nAge)`
 
@@ -579,7 +579,7 @@ Anchor: `u_by_age = zeros(nAge)`
     # lifetime utility, 2.2e-3 at Jc = 150.
 ```
 
-## `hiinf/solve_history_independent_tax.jl:1370`
+## `hiinf/solve.jl:1370`
 
 Anchor: `if age > 1`
 
@@ -610,7 +610,7 @@ Anchor: `if age > 1`
         # an undersized maxAge is visible rather than silent.
 ```
 
-## `hiinf/solve_history_independent_tax.jl:1526`
+## `hiinf/solve.jl:1526`
 
 Anchor: `diagnostics = (; vIters = vIters_by_kappa, vGap = vGap_by_kappa,`
 
@@ -635,7 +635,7 @@ Anchor: `diagnostics = (; vIters = vIters_by_kappa, vGap = vGap_by_kappa,`
     # equilibrium, in `attach_elapsed`.
 ```
 
-## `hiinf/solve_history_independent_tax.jl:2027`
+## `hiinf/solve.jl:2027`
 
 Anchor: `if isfinite(residuals[i]) && isfinite(residuals[i + 1]) &&`
 

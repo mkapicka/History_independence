@@ -2,9 +2,9 @@
 # model_settings.jl
 #
 # Settings for the history-dependent tax model. Loaded INSIDE the
-# HistoryDependentTax module by solve_history_dependent_tax.jl and standalone:
+# HistoryDependentTax module by solve.jl and standalone:
 # it does not reference the history-independent SETTINGS. After editing,
-# re-include solve_history_dependent_tax.jl.
+# re-include solve.jl.
 #
 # HD_SETTINGS is the single source of truth: HDParams has no defaults for these
 # keywords, so a missing entry raises UndefKeywordError rather than falling

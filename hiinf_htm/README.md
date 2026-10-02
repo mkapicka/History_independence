@@ -33,9 +33,9 @@ converging to it.
 
 ## Running it
 
-    julia --project=. run_history_independent_tax.jl                      # defaults
-    julia --project=. -e 'include("run_history_independent_tax.jl");
-                          run_history_independent_tax(pSS=0.95, pHH=0.5)'
+    julia --project=. main.jl                      # defaults
+    julia --project=. -e 'include("main.jl");
+                          main_hi(pSS=0.95, pHH=0.5)'
 
 `SETTINGS` in `model_settings.jl` default to
 **`pSS = 0.8882970895, pHH = 0.7589294614`**, calibrated to Kaplan, Violante and
@@ -64,16 +64,16 @@ Three parameterizations are nested, as in psmodel.tex:
 
 ## Calibration
 
-`calibrate_history_independent_tax_beta.jl` is ported from `hiinf`: two
+`calibrate_beta.jl` is ported from `hiinf`: two
 instruments (`bbar`, `beta`) against two targets (true borrowing limit / mean
 labor income = 0.185, and the mean or median asset ratio). Run it with
 
-    julia --project=. calibrate_history_independent_tax_beta.jl
+    julia --project=. calibrate_beta.jl
     # or, from a session:
-    r = calibrate_history_independent_tax_beta(calib = BetaCalibration(asset_moment = :mean),
+    r = calibrate_beta(calib = BetaCalibration(asset_moment = :mean),
                                                nZ = 15, nEps = 11, nKappa = 5, nA = 151)
 
-`calibrate_history_independent_tax.jl` comes along because the beta
+`calibrate_twoprice.jl` comes along because the beta
 driver includes it for `solve_scalar`, `moments_from` and `with_tee`; its own
 three-instrument calibration is carried over untouched and unused.
 
@@ -140,8 +140,8 @@ before `maxAge` does. What the rule proxies for is already measured ex post by
 
 ## What changed against `hiinf`
 
-`plot_history_independent_tax.jl` and
-`calibrate_history_independent_tax.jl` are byte-identical; the solver,
+`plot.jl` and
+`calibrate_twoprice.jl` are byte-identical; the solver,
 settings, runner and beta calibration change by 471 / 32 / 15 / 60 lines. The saver's problem is untouched — it is the
 `hiinf` code with `EV_S` substituted for `EV`.
 
