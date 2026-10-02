@@ -596,6 +596,17 @@ function simulate_kappa!(C, H, Y, A, stats::HIStatsAccumulator,
                           "access=$acc_label): no feasible choice was found")
                 end
                 c = lambda * tax_base[iz, ie] * h^(1.0 - p.tau) + cash
+                # Without this, an infeasible state reaches log(c) and surfaces as
+                # a bare DomainError naming only the negative number. The hours
+                # floor is positive, so the h > 0 check above does not catch it:
+                # hMin passes, earns almost nothing, and leaves c < 0 when a' is
+                # pinned at a borrowing limit the state cannot service. The access
+                # label is reported because the first question about such a cell is
+                # whether it is a saver or hand-to-mouth.
+                c > 0.0 || error(
+                    "non-positive consumption on a positive-mass state " *
+                    "(age=$age, ia=$ia, iz=$iz, ie=$ie, " *
+                    "access=$(is_htm ? "H" : "S"), a=$a, ap=$ap, h=$h, c=$c)")
                 y = wage_base[iz, ie] * h
                 u = log(c) - p.phi * h^(1.0 + p.eta) / (1.0 + p.eta)
                 # A borrowing limit only exists before the terminal age, where
