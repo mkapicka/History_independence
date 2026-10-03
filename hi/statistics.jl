@@ -156,14 +156,36 @@ Marked `@inline`: this is the innermost loop of the forward pass.
         if mpc_extrapolated
             stats.mpc_extrapolated_mass += weighted_mass
         end
-        # Exact zero rather than a tolerance, matching `mpcs(:)==0` in
-        # MPCFinder.m: an exact zero here means a flat segment of the
-        # interpolated consumption function, which is a real feature of a
-        # grid-search policy and not floating-point noise.
-        if mpc > 0.0
+        # A TOLERANCE, not an exact zero. Discrete_HA tests `mpcs(:)==0`, which
+        # works there because its EGP consumption function produces bit-exact
+        # ties. It does not work here: a flat segment produces +-1e-6, never a
+        # bit-exact zero, so until 2026-10-03 the zero bucket read 0.000000 in
+        # every run while the mass it was meant to catch was split between the
+        # other two by the sign of the rounding error.
+        #
+        # Measured at model age 33, nA = 101, asset_choice_method = :interpolate:
+        # 7.9% of mass has a TRUE MPC of exactly zero -- the household saves the
+        # whole marginal asset increment, so a rises by 0.005518 and q*a' by
+        # 0.005517 and consumption does not move -- and that mass was being
+        # reported as 4.0% positive and 3.9% negative. With this tolerance the
+        # negative share there becomes exactly 0, which is what a continuous a'
+        # should give.
+        #
+        # The threshold is the RESOLUTION LIMIT, not a judgement call. The asset
+        # choice is found to `asset_choice_tol`, and the MPC divides a
+        # consumption difference by `mpc_shock`, so nothing below their ratio
+        # carries information. At the shipped values that is
+        # 1e-8 / 0.0063278 = 1.58e-6, against an observed median |mpc| of 1.12e-6
+        # among the cells this reclassifies.
+        #
+        # It changes nothing under the default :grid_search, where the negatives
+        # come from steps in the a' policy and have a median magnitude of 0.276:
+        # no mass there is within 1e-4 of zero, let alone within 1.58e-6.
+        mpc_zero_tol = safe_ratio(p.asset_choice_tol, p.mpc_shock)
+        if mpc > mpc_zero_tol
             stats.sum_mpc_positive += weighted_mass * mpc
             stats.mpc_positive_mass += weighted_mass
-        elseif mpc < 0.0
+        elseif mpc < -mpc_zero_tol
             stats.mpc_negative_mass += weighted_mass
         else
             stats.mpc_zero_mass += weighted_mass
