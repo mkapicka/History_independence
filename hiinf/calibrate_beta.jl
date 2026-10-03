@@ -120,7 +120,19 @@ Base.@kwdef struct BetaCalibration
     # boundary and it will stall against the bracket cap.
     medianAssetsToMeanLaborIncome::Float64       = 0.0498
     meanAssetsToMeanLaborIncome::Float64         = 0.588
+    # Ignored when `bbar_fixed` is set: there is then no instrument left to hit
+    # it with.
     trueBorrowingLimitToMeanLaborIncome::Float64 = 0.185
+
+    # Hold the borrowing scale EXOGENOUS instead of calibrating it. `nothing`
+    # calibrates bbar to the limit target; `bbar_fixed = 0.0` imposes a ZERO
+    # borrowing limit, so assets are nonnegative and the model is a pure
+    # buffer-stock economy. Any other number pins bbar there.
+    #
+    # Fixing it drops the bbar BLOCK, not just the instrument: with one
+    # instrument there is one target, so the limit moment becomes a reported
+    # output and convergence is judged on the asset residual alone.
+    bbar_fixed::Union{Nothing,Float64} = nothing
     asset_moment::Symbol                         = :mean   # :mean or :median
 
     # Starting points. bbar_init is close to its root by construction: the
@@ -173,7 +185,9 @@ bc_asset_label_short(c::BetaCalibration) =
 bc_resid_beta(m, t) = bc_asset_ratio(m, t) - bc_asset_target(t)
 bc_resid_bbar(m, t) = m.trueBorrowingLimitToMeanLaborIncome -
                       t.trueBorrowingLimitToMeanLaborIncome
-bc_max_abs_resid(m, t) = max(abs(bc_resid_beta(m, t)), abs(bc_resid_bbar(m, t)))
+bc_max_abs_resid(m, t) = t.bbar_fixed === nothing ?
+    max(abs(bc_resid_beta(m, t)), abs(bc_resid_bbar(m, t))) :
+    abs(bc_resid_beta(m, t))
 
 """
     calibrate_beta(; calib, base_kwargs...)
@@ -228,7 +242,12 @@ function calibrate_beta(;
     relax_at_ceiling = qSav_used / (qSav_used - beta_hi)
 
     x = [clamp(calib.beta_init, beta_lo,          beta_hi),
-         clamp(calib.bbar_init, calib.bbar_min,   calib.bbar_max)]
+         calib.bbar_fixed === nothing ?
+             clamp(calib.bbar_init, calib.bbar_min, calib.bbar_max) :
+             Float64(calib.bbar_fixed)]
+    calib.bbar_fixed === nothing || calib.bbar_fixed <= 0.0 ||
+        error("bbar_fixed must be <= 0 (0 means a zero borrowing limit), " *
+              "got $(calib.bbar_fixed)")
 
     # Memoized on the instrument PAIR: Brent re-probes bracket endpoints, and
     # the sweep-end evaluation repeats the point the last block just solved.
@@ -254,18 +273,24 @@ function calibrate_beta(;
     # Sweep order: the near-exact block first. `i` indexes x = [beta, bbar].
     # Built here rather than as a const, because the beta bounds are only known
     # once qSav is.
-    blocks = (
-        (i = 2, lo = calib.bbar_min, hi = calib.bbar_max,
-         resid = bc_resid_bbar, name = "bbar", target = calib.trueBorrowingLimitToMeanLaborIncome),
-        (i = 1, lo = beta_lo,       hi = beta_hi,
-         resid = bc_resid_beta, name = "beta", target = bc_asset_target(calib)),
-    )
+    beta_block = (i = 1, lo = beta_lo, hi = beta_hi,
+                  resid = bc_resid_beta, name = "beta", target = bc_asset_target(calib))
+    bbar_block = (i = 2, lo = calib.bbar_min, hi = calib.bbar_max,
+                  resid = bc_resid_bbar, name = "bbar",
+                  target = calib.trueBorrowingLimitToMeanLaborIncome)
+    blocks = calib.bbar_fixed === nothing ? (bbar_block, beta_block) : (beta_block,)
 
     if calib.verbose
         println("\n=== Beta calibration targets ===")
         @printf("%-40s = %.8f\n", bc_asset_label(calib), bc_asset_target(calib))
-        @printf("%-40s = %.8f\n", "true borrowing limit / mean labor income",
-                calib.trueBorrowingLimitToMeanLaborIncome)
+        if calib.bbar_fixed === nothing
+            @printf("%-40s = %.8f\n", "true borrowing limit / mean labor income",
+                    calib.trueBorrowingLimitToMeanLaborIncome)
+        else
+            @printf("bbar                                     : FIXED at %s (not calibrated)%s\n",
+                    calib.bbar_fixed,
+                    calib.bbar_fixed == 0.0 ? "  -- zero borrowing limit, assets >= 0" : "")
+        end
         println("share negative liquid assets             : NOT TARGETED (reported only)")
         @printf("prices (GIVEN, not calibrated)           : qSav=%.6f qBorr=%.6f qGov=%.6f\n",
                 qSav_used, qBorr_used, qGov_used)
@@ -378,7 +403,10 @@ function calibrate_beta(;
     moments_final = moments_from(eq)
     residuals = (;
         assetsToMeanLaborIncome             = bc_resid_beta(moments_final, calib),
-        trueBorrowingLimitToMeanLaborIncome = bc_resid_bbar(moments_final, calib),
+        # NaN rather than a number when bbar is fixed: with no target, a
+        # residual would invite being read as a miss.
+        trueBorrowingLimitToMeanLaborIncome =
+            calib.bbar_fixed === nothing ? bc_resid_bbar(moments_final, calib) : NaN,
     )
 
     result = (;
@@ -431,10 +459,17 @@ function print_beta_calibration_result(result)
     @printf("%-40s %12s %12s %11s\n", "moment", "model", "target", "residual")
     @printf("%-40s %12.8f %12.8f %11.2e\n", bc_asset_label(t),
             bc_asset_ratio(m, t), bc_asset_target(t), r.assetsToMeanLaborIncome)
-    @printf("%-40s %12.8f %12.8f %11.2e\n", "true borrowing limit / mean labor income",
-            m.trueBorrowingLimitToMeanLaborIncome,
-            t.trueBorrowingLimitToMeanLaborIncome,
-            r.trueBorrowingLimitToMeanLaborIncome)
+    # With bbar fixed nothing aims at the limit, so scoring it would report a
+    # failure that is not one.
+    if t.bbar_fixed === nothing
+        @printf("%-40s %12.8f %12.8f %11.2e\n", "true borrowing limit / mean labor income",
+                m.trueBorrowingLimitToMeanLaborIncome,
+                t.trueBorrowingLimitToMeanLaborIncome,
+                r.trueBorrowingLimitToMeanLaborIncome)
+    else
+        @printf("%-40s %12.8f %12s %11s\n", "true borrowing limit / mean labor income",
+                m.trueBorrowingLimitToMeanLaborIncome, "bbar fixed", "--")
+    end
     @printf("%-40s %12.8f %12s %11s\n", "share negative liquid assets",
             m.shareNegativeLiquidAssets, "not targeted", "--")
     @printf("%-40s %12.8f %12s %11s\n",
